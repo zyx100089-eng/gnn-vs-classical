@@ -56,6 +56,12 @@ def goemans_williamson(G: nx.Graph, n_roundings: int = 100,
     node_idx = {v: i for i, v in enumerate(nodes)}
 
     if n > max_n:
+        import warnings
+        warnings.warn(
+            f"Graph has {n} nodes > max_n={max_n}; falling back to spectral. "
+            "GW results for this graph are actually spectral.",
+            stacklevel=2,
+        )
         from .spectral import spectral_maxcut
         return spectral_maxcut(G, refine=True)
 
@@ -85,6 +91,12 @@ def goemans_williamson(G: nx.Graph, n_roundings: int = 100,
         prob.solve(solver=cp.SCS, verbose=False, max_iters=10000, eps=1e-6)
 
     if prob.status not in ("optimal", "optimal_inaccurate"):
+        import warnings
+        warnings.warn(
+            f"SDP solver status={prob.status}; falling back to spectral. "
+            "GW results for this graph are actually spectral.",
+            stacklevel=2,
+        )
         from .spectral import spectral_maxcut
         return spectral_maxcut(G, refine=True)
 

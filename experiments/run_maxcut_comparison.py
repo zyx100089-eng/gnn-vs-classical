@@ -189,18 +189,18 @@ def main():
 
     # --- Figure 2: Cut value comparison by size (aggregated across families) ---
     fig, ax = plt.subplots(figsize=(8, 5))
-    for algo, col, label in [
+    for algo, color, label in [
         ("gnn_cut", "blue", "GNN"),
         ("greedy_cut", "orange", "Greedy"),
         ("spectral_cut", "green", "Spectral"),
         ("gw_cut", "red", "Goemans-Williamson"),
         ("random_cut", "gray", "Random"),
     ]:
-        sub = df.dropna(subset=[col])
+        sub = df.dropna(subset=[algo])
         if sub.empty:
             continue
-        means = sub.groupby("n")[col].mean()
-        stds = sub.groupby("n")[col].std()
+        means = sub.groupby("n")[algo].mean()
+        stds = sub.groupby("n")[algo].std()
         ax.errorbar(means.index, means.values, yerr=stds.values,
                     label=label, marker="o", capsize=3)
     ax.set_xlabel("Graph Size (n)")
@@ -237,17 +237,17 @@ def main():
 
     # --- Figure 4: Runtime comparison ---
     fig, ax = plt.subplots(figsize=(8, 5))
-    for algo, col, label in [
+    for algo, color, label in [
         ("gnn_time", "blue", "GNN (inference)"),
         ("greedy_time", "orange", "Greedy"),
         ("spectral_time", "green", "Spectral"),
         ("gw_time", "red", "Goemans-Williamson"),
     ]:
-        sub = df.dropna(subset=[col])
+        sub = df.dropna(subset=[algo])
         if sub.empty:
             continue
-        means = sub.groupby("n")[col].mean()
-        ax.plot(means.index, means.values, label=label, marker="o")
+        means = sub.groupby("n")[algo].mean()
+        ax.plot(means.index, means.values, label=label, marker="o", color=color)
     ax.set_xlabel("Graph Size (n)")
     ax.set_ylabel("Runtime (seconds)")
     ax.set_title("Algorithm Runtime vs Graph Size")

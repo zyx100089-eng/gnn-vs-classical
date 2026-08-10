@@ -1,8 +1,10 @@
 """
 Graph Isomorphism Network (GIN) for Max-Cut.
 
-GIN (Xu et al., 2019) is the most expressive message-passing GNN —
-it can distinguish any two graphs that the Weisfeiler-Leman test can.
+GIN (Xu et al., 2019) is as expressive as the 1-WL test — it can distinguish
+any two graphs that the Weisfeiler-Leman test can. Higher-order GNNs (e.g.
+k-GNN) are strictly more expressive, but GIN is the most expressive
+*standard* message-passing GNN.
 
 For Max-Cut, each node outputs a probability p_v in [0, 1] representing
 which side of the partition it belongs to. The loss maximizes the expected

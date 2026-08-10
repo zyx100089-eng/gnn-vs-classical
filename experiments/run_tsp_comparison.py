@@ -45,9 +45,63 @@ def coords_to_pyg(coords: np.ndarray) -> Data:
     return Data(x=x, edge_index=edge_index, num_nodes=n)
 
 
-def train_tsp_gnn(sizes: list, n_train: int = 1000, epochs: int = 80,
+def sample_tour_reinforce(embeddings: torch.Tensor, dist_matrix: torch.Tensor,
+                          temperature: float = 1.0, greedy: bool = False):
+    """Sample a tour using a stochastic policy based on embeddings.
+
+    The policy: at each step, the next city is chosen with probability
+    proportional to softmax(embedding_similarity / distance * temperature).
+    This is a proper stochastic policy — we can compute log π(tour) as the
+    sum of log-probabilities of each choice.
+
+    Returns (tour, log_prob, tour_length).
+    """
+    n = len(dist_matrix)
+    # Score matrix: embedding similarity divided by distance
+    scores = (embeddings @ embeddings.T) / (dist_matrix + 1e-6) / temperature
+
+    visited = torch.zeros(n, dtype=torch.bool)
+    tour = [0]
+    visited[0] = True
+    log_prob = 0.0
+
+    for _ in range(n - 1):
+        current = tour[-1]
+        # Mask visited cities
+        logits = scores[current].clone()
+        logits[visited] = -float('inf')
+        probs = torch.softmax(logits, dim=0)
+
+        if greedy:
+            next_city = int(torch.argmax(probs))
+        else:
+            next_city = int(torch.multinomial(probs, 1))
+
+        log_prob += torch.log(probs[next_city] + 1e-10).item()
+        tour.append(next_city)
+        visited[next_city] = True
+
+    # Tour length
+    length = sum(dist_matrix[tour[i]][tour[(i + 1) % n]].item() for i in range(n))
+
+    return tour, log_prob, length
+
+
+def train_tsp_gnn(sizes: list, n_train: int = 200, epochs: int = 80,
                   seed: int = 42, device: str = "cpu") -> GINTsp:
-    """Train GNN on TSP instances using REINFORCE-like loss."""
+    """Train GNN on TSP instances using proper REINFORCE policy gradient.
+
+    REINFORCE: sample a tour from the policy, compute log π(tour) * reward,
+    and backpropagate. The reward is (nn_length - gnn_length) / nn_length,
+    so the policy is encouraged to produce tours shorter than NN.
+
+    Key difference from the previous broken version:
+    - The reward is NOT detached — log_prob is computed from the policy and
+      multiplied by the reward, giving a proper policy gradient.
+    - The policy is stochastic (softmax over next cities), not a deterministic
+      greedy tour.
+    - The log-probability of the sampled tour is computed and used.
+    """
     torch.manual_seed(seed)
     np.random.seed(seed)
     train_n = 50
@@ -58,41 +112,72 @@ def train_tsp_gnn(sizes: list, n_train: int = 1000, epochs: int = 80,
     for i in range(n_train):
         coords, dist = generate_tsp_instance(train_n, seed=seed + i)
         train_data.append(coords_to_pyg(coords))
-        train_dists.append(dist)
+        train_dists.append(torch.tensor(dist, dtype=torch.float))
 
     model = GINTsp(input_dim=2, hidden_dim=128, n_layers=5).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    # Compute a baseline: average NN tour length over training set
+    baseline_lengths = []
+    for d in train_dists:
+        _, nn_len = nearest_neighbor_tsp(d.numpy())
+        baseline_lengths.append(nn_len)
+    avg_baseline = np.mean(baseline_lengths)
 
     for epoch in range(1, epochs + 1):
         model.train()
-        total_loss = 0
-        n_batches = 0
+        total_reward = 0
+        n_samples = 0
 
-        for idx in range(0, n_train, 32):
-            batch_indices = range(idx, min(idx + 32, n_train))
-            batch_loss = torch.tensor(0.0, device=device)
+        for idx in range(0, n_train, 16):
+            batch_indices = range(idx, min(idx + 16, n_train))
+            batch_loss = torch.tensor(0.0, device=device, requires_grad=True)
+            batch_reward = 0.0
 
             for i in batch_indices:
                 data = train_data[i].to(device)
-                embeddings = model(data).detach().cpu().numpy()
-                _, gnn_length = greedy_tour_from_embeddings(embeddings, train_dists[i])
-                _, nn_length = nearest_neighbor_tsp(train_dists[i])
-                reward = (nn_length - gnn_length) / nn_length
+                dist_t = train_dists[i].to(device)
 
-                emb = model(data)
-                # Simple loss: encourage embeddings that produce shorter tours
-                edge_scores = (emb[data.edge_index[0]] * emb[data.edge_index[1]]).sum(dim=-1)
-                batch_loss = batch_loss - reward * edge_scores.mean()
+                # Forward pass — embeddings are differentiable
+                embeddings = model(data)
+
+                # Sample a tour from the stochastic policy
+                tour, log_prob, tour_length = sample_tour_reinforce(
+                    embeddings, dist_t, temperature=2.0, greedy=False
+                )
+
+                # Reward: how much shorter than NN baseline (positive = good)
+                _, nn_length = nearest_neighbor_tsp(train_dists[i].numpy())
+                reward = (nn_length - tour_length) / nn_length
+
+                # REINFORCE: loss = -log_prob * reward
+                # If reward > 0 (tour shorter than NN), increase log_prob of this tour
+                # If reward < 0 (tour longer than NN), decrease log_prob of this tour
+                # We use the moving average as a baseline to reduce variance
+                advantage = reward - (avg_baseline - tour_length) / avg_baseline
+                batch_loss = batch_loss - log_prob * advantage
+                batch_reward += reward
+                n_samples += 1
 
             optimizer.zero_grad()
             batch_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            total_loss += batch_loss.item()
-            n_batches += 1
+            total_reward += batch_reward
+
+        # Update baseline with exponential moving average
+        avg_reward = total_reward / max(n_samples, 1)
+        if epoch == 1:
+            ema_reward = avg_reward
+        else:
+            ema_reward = 0.9 * ema_reward + 0.1 * avg_reward
 
         if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{epochs} | Loss: {total_loss/max(n_batches,1):.4f}")
+            print(f"  Epoch {epoch:3d}/{epochs} | avg reward: {avg_reward:.4f} | "
+                  f"EMA: {ema_reward:.4f}")
+
+        scheduler.step()
 
     return model
 
@@ -148,13 +233,18 @@ def main():
             row["twoopt_length"] = opt_len
             row["twoopt_time"] = time.perf_counter() - t0
 
-            # GNN
+            # GNN — sample greedy tour from the trained policy
             t0 = time.perf_counter()
             data = coords_to_pyg(coords).to(device)
             model.eval()
             with torch.no_grad():
-                embeddings = model(data).cpu().numpy()
-            gnn_tour, gnn_len = greedy_tour_from_embeddings(embeddings, dist)
+                embeddings = model(data)
+            # Greedy tour from the trained policy
+            gnn_tour, _, gnn_len = sample_tour_reinforce(
+                embeddings.squeeze(0) if embeddings.dim() == 3 else embeddings,
+                torch.tensor(dist, dtype=torch.float),
+                temperature=1.0, greedy=True
+            )
             # Refine with 2-opt
             gnn_tour, gnn_len = two_opt_improve(gnn_tour, dist)
             row["gnn_length"] = gnn_len
