@@ -13,6 +13,7 @@ results/gnn_solutions/*
 *.pt
 *.pth
 *.ckpt
+!results/analysis/tsp_gnn_weights.pt
 .DS_Store
 .pytest_cache/
 data/

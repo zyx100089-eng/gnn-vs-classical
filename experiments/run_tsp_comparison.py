@@ -136,6 +136,10 @@ def train_tsp_gnn(sizes: list, n_train: int = 200, epochs: int = 80,
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    # Training log (committed with the results so the repo shows the
+    # model actually trained — reward and loss over epochs)
+    log_rows = []
+
     # Compute a baseline: average NN tour length over training set
     baseline_lengths = []
     for d in train_dists:
@@ -194,8 +198,18 @@ def train_tsp_gnn(sizes: list, n_train: int = 200, epochs: int = 80,
         if epoch % 10 == 0 or epoch == 1:
             print(f"  Epoch {epoch:3d}/{epochs} | avg reward: {avg_reward:.4f} | "
                   f"EMA: {ema_reward:.4f}")
+        log_rows.append({"epoch": epoch, "avg_reward": avg_reward,
+                         "ema_reward": ema_reward})
 
         scheduler.step()
+
+    # Persist the training log and the trained weights alongside the
+    # comparison results, so the training is reproducible from the repo.
+    results_dir = Path("results/analysis")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(log_rows).to_csv(results_dir / "tsp_training_log.csv",
+                                  index=False)
+    torch.save(model.state_dict(), results_dir / "tsp_gnn_weights.pt")
 
     return model
 
