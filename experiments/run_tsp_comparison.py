@@ -54,22 +54,38 @@ def sample_tour_reinforce(embeddings: torch.Tensor, dist_matrix: torch.Tensor,
     This is a proper stochastic policy — we can compute log π(tour) as the
     sum of log-probabilities of each choice.
 
+    log_prob is accumulated as a *tensor* (never detached), so the
+    gradient flows from log π(tour) back through the softmax to the
+    embeddings — the score-function estimator.  (The tour length is
+    detached via .item(): the reward is a scalar constant in REINFORCE
+    and must not carry gradient.)
+
     Returns (tour, log_prob, tour_length).
     """
     n = len(dist_matrix)
-    # Score matrix: embedding similarity divided by distance
-    scores = (embeddings @ embeddings.T) / (dist_matrix + 1e-6) / temperature
+    # Score matrix: embedding similarity divided by distance.
+    # Embeddings are L2-normalised first: the dot product is then a
+    # cosine similarity in [-1, 1], so scores stay bounded and the
+    # softmax never saturates to nan (unbounded dot products make the
+    # training diverge — embeddings grow without limit).
+    emb_norm = embeddings / (embeddings.norm(dim=-1, keepdim=True) + 1e-8)
+    scores = (emb_norm @ emb_norm.T) / (dist_matrix + 1e-6) / temperature
 
-    visited = torch.zeros(n, dtype=torch.bool)
+    visited = [False] * n
     tour = [0]
     visited[0] = True
-    log_prob = 0.0
+    log_prob = torch.zeros((), device=embeddings.device)
 
     for _ in range(n - 1):
         current = tour[-1]
-        # Mask visited cities
-        logits = scores[current].clone()
-        logits[visited] = -float('inf')
+        # Mask visited cities (fresh mask each step: no in-place ops on
+        # tensors that participate in the autograd graph)
+        mask = torch.tensor(visited, device=embeddings.device)
+        logits = torch.where(
+            mask,
+            torch.full_like(scores[current], -float('inf')),
+            scores[current],
+        )
         probs = torch.softmax(logits, dim=0)
 
         if greedy:
@@ -77,7 +93,7 @@ def sample_tour_reinforce(embeddings: torch.Tensor, dist_matrix: torch.Tensor,
         else:
             next_city = int(torch.multinomial(probs, 1))
 
-        log_prob += torch.log(probs[next_city] + 1e-10).item()
+        log_prob = log_prob + torch.log(probs[next_city] + 1e-10)
         tour.append(next_city)
         visited[next_city] = True
 
@@ -96,8 +112,10 @@ def train_tsp_gnn(sizes: list, n_train: int = 200, epochs: int = 80,
     so the policy is encouraged to produce tours shorter than NN.
 
     Key difference from the previous broken version:
-    - The reward is NOT detached — log_prob is computed from the policy and
-      multiplied by the reward, giving a proper policy gradient.
+    - log_prob is accumulated as a tensor (not detached via .item()),
+      so the score-function estimator has a real gradient path to the
+      model parameters.  The reward is a scalar constant (detached),
+      which is correct for REINFORCE.
     - The policy is stochastic (softmax over next cities), not a deterministic
       greedy tour.
     - The log-probability of the sampled tour is computed and used.

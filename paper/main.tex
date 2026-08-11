@@ -22,7 +22,7 @@ We conduct a rigorous empirical audit comparing GIN-based GNN solvers against cl
 For Max-Cut, the Goemans-Williamson SDP relaxation ($\alpha \geq 0.878$) dominates the GNN across all graph families, with the GNN winning only 1.8\% of 600 instances.
 For TSP, NN+2-opt local search matches or outperforms the GNN+2-opt on all 90 Euclidean instances, with the GNN providing no advantage in initialization quality.
 For Graph Coloring, DSatur produces colorings using 3.4$\times$ fewer colors than the GNN, which wins 0\% of 600 instances.
-We further show that spectral graph properties---particularly algebraic connectivity, spectral gap, and clustering coefficient---are the strongest predictors of GNN failure, yet the prediction task itself is at chance: balanced accuracy 0.52 and F1 0.12, with the 88\% raw accuracy no better than the 98.2\% majority-class baseline.
+We further show that spectral graph properties---particularly the Laplacian spectral radius, degree variance, and spectral gap---are the strongest predictors of GNN failure, yet the prediction task itself is at chance: balanced accuracy 0.52 and F1 0.12, with the raw accuracy (57\% LR, 78\% RF) no better than the 98.2\% majority-class baseline.
 The GNN's primary advantage is inference speed (up to 60$\times$ faster than SDP), not solution quality.
 These results demonstrate that for practitioners, classical algorithms with mathematical guarantees remain the reliable baseline, and GNNs should be evaluated against them---not just against naive heuristics.
 \end{abstract}
@@ -46,7 +46,7 @@ A GNN that beats a random partition on Max-Cut is unremarkable; one that beats t
     \item \textbf{Maximum Cut}: GNN (GIN + local search) vs.\ Goemans-Williamson SDP ($\alpha \geq 0.878$), spectral relaxation, and greedy, across 600 instances from 5 graph families.
     \item \textbf{Travelling Salesman Problem}: GNN vs.\ Christofides ($\alpha \leq 1.5$) and 2-opt local search, on 90 Euclidean instances.
     \item \textbf{Graph Coloring}: GNN vs.\ DSatur \cite{brelaz1979new} and Welsh-Powell, across 600 instances from 5 graph families.
-    \item \textbf{Failure Prediction}: We train classifiers on spectral graph properties to predict when GNNs fail. The task is at chance---balanced accuracy 0.52, F1 0.12---because the GNN wins too rarely (1.8\%) to learn a useful predictor; the 88\% raw accuracy is no better than the 98.2\% majority-class baseline.
+    \item \textbf{Failure Prediction}: We train classifiers on spectral graph properties to predict when GNNs fail. The task is at chance---balanced accuracy 0.52, F1 0.12---because the GNN wins too rarely (1.8\%) to learn a useful predictor; the raw accuracy (57\% LR, 78\% RF) is no better than the 98.2\% majority-class baseline.
 \end{enumerate}
 
 \section{Background}
@@ -182,15 +182,15 @@ Christofides achieves tours within 5.6\% of the best (without any local search r
 \toprule
 \textbf{Algorithm} & \textbf{Avg Colors/Best} & \textbf{Win Rate} & \textbf{Avg Time (s)} \\
 \midrule
-Greedy (random) & 1.283 & 0.0\% & $< 0.001$ \\
-Welsh-Powell & 1.138 & 0.0\% & $< 0.001$ \\
-DSatur & \textbf{1.003} & \textbf{98.8\%} & 0.005 \\
-\textbf{GNN + repair} & 3.396 & 0.0\% & 0.005 \\
+Greedy (random) & 1.280 & 0.0\% & $< 0.001$ \\
+Welsh-Powell & 1.136 & 0.0\% & $< 0.001$ \\
+DSatur & \textbf{1.000} & \textbf{98.8\%} & 0.005 \\
+\textbf{GNN + repair} & 3.388 & 0.0\% & 0.005 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Graph coloring is the GNN's worst problem: it uses $3.4\times$ more colors than DSatur on average, and wins 0\% of 600 instances across all families and sizes.
+Graph coloring is the GNN's worst problem: it uses $3.4\times$ more colors than DSatur on average (mean of per-instance ratios; the ratio of means is $2.8\times$), and wins 0\% of 600 instances across all families and sizes.
 This is because coloring is fundamentally a \emph{constraint satisfaction} problem: the objective is to minimize colors while ensuring no adjacent vertices share a color.
 The GNN's soft probabilistic output requires post-hoc conflict repair, which greedily introduces additional colors.
 DSatur's saturation-based ordering, by contrast, naturally respects the constraint structure.
@@ -223,8 +223,8 @@ We train logistic regression and random forest classifiers to predict whether th
 
 \textbf{Key findings:}
 \begin{itemize}
-    \item The minimum eigenvalue of the adjacency matrix ($\lambda_{\min}(A)$) is the single strongest predictor of classical dominance.
-    \item Graphs with high clustering coefficients and low spectral gap (e.g., Watts-Strogatz small-world) are hardest for GNNs.
+    \item The minimum eigenvalue of the adjacency matrix ($\lambda_{\min}(A)$) is the single strongest predictor of classical dominance (logistic regression), with the Laplacian spectral radius, degree variance, and spectral gap leading the random-forest importances.
+    \item Graphs with low spectral gap (e.g., Watts-Strogatz small-world) are hardest for GNNs.
     \item Barab\'asi-Albert graphs, with their heavy-tailed degree distribution, are most amenable to GNNs.
     \item \textbf{However}, with only 1.8\% positive examples, the failure prediction task is essentially at chance: balanced accuracy 0.52, F1 0.12. The majority-class baseline (always predict ``classical wins'') achieves 98.2\% raw accuracy---higher than any learned model. The GNN wins too rarely to learn a useful predictor.
 \end{itemize}
