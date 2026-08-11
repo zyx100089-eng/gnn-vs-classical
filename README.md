@@ -20,7 +20,7 @@ GNNs are increasingly proposed as solvers for NP-hard problems. But classical al
 ### TSP: GNN+2-opt ≈ NN+2-opt
 - Christofides + 2-opt consistently outperforms GNN + 2-opt
 - The GNN is trained with proper REINFORCE (policy gradient with log-probability of the sampled tour times the reward), but the learned embeddings do not produce better initial tours than nearest-neighbour
-- 2-opt local search erases most of the initialisation difference
+- 2-opt local search erases the initialisation difference completely: the trained GNN collapses to nearest-neighbour (all pairwise embedding cosines = 1.0), so GNN+2-opt is literally NN+2-opt — see the paper for the mechanism
 
 ### Graph Coloring: GNN vs DSatur
 - DSatur uses fewer colors on structured graphs

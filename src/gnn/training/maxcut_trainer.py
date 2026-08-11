@@ -8,6 +8,8 @@ using the unsupervised cut maximization loss. No ground-truth labels needed.
 import torch
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
+from pathlib import Path
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 
@@ -70,6 +72,8 @@ def train_maxcut_gnn(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    log_rows = []
+
     for epoch in range(1, epochs + 1):
         model.train()
         total_loss = 0
@@ -94,6 +98,15 @@ def train_maxcut_gnn(
 
         if verbose and (epoch % 10 == 0 or epoch == 1):
             print(f"  Epoch {epoch:3d}/{epochs} | Loss: {avg_loss:.4f}")
+        log_rows.append({"epoch": epoch, "avg_loss": avg_loss})
+
+    # Persist the training log and weights alongside the results, so
+    # the training is reproducible from the repo.
+    results_dir = Path("results/analysis")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(log_rows).to_csv(results_dir / "maxcut_training_log.csv",
+                                  index=False)
+    torch.save(model.state_dict(), results_dir / "maxcut_gnn_weights.pt")
 
     return model
 

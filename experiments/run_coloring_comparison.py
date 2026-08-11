@@ -62,6 +62,8 @@ def train_coloring_gnn(n_train: int = 1500, epochs: int = 100,
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    log_rows = []
+
     for epoch in range(1, epochs + 1):
         model.train()
         total_loss = 0
@@ -79,8 +81,18 @@ def train_coloring_gnn(n_train: int = 1500, epochs: int = 100,
             total_loss += loss.item()
 
         scheduler.step()
+        avg_loss = total_loss / 500
         if epoch % 20 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{epochs} | Loss: {total_loss/500:.4f}")
+            print(f"  Epoch {epoch:3d}/{epochs} | Loss: {avg_loss:.4f}")
+        log_rows.append({"epoch": epoch, "avg_loss": avg_loss})
+
+    # Persist the training log and weights alongside the results, so
+    # the training is reproducible from the repo.
+    results_dir = Path("results/analysis")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(log_rows).to_csv(results_dir / "coloring_training_log.csv",
+                                  index=False)
+    torch.save(model.state_dict(), results_dir / "coloring_gnn_weights.pt")
 
     return model
 
