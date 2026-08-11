@@ -161,8 +161,9 @@ NN + 2-opt & --- & \textbf{1.003} & \textbf{85.6\%} & 0.009 \\
 
 The TSP GNN is trained with proper REINFORCE: a stochastic policy samples the next city from a softmax over embedding-similarity / distance, the log-probability of the sampled tour is computed, and the policy gradient is $\nabla_\theta \log \pi(\text{tour}) \cdot \text{advantage}$.
 Despite this, GNN+2-opt produces \emph{identical} tour lengths to NN+2-opt.
-The GNN's learned embeddings do not provide a better initialization than the simple nearest neighbor heuristic---once 2-opt local search is applied, both converge to the same local optima.
-This suggests that for TSP at this scale, the value of the learned initialization is entirely subsumed by cheap local search.
+Inspection of the trained embeddings (committed with the results) shows why: REINFORCE pushes the policy toward the greedy-scoring optimum, which makes the learned node embeddings mutually parallel---all pairwise cosine similarities equal 1.0 to machine precision---so the greedy score degenerates to $1/\text{dist}$, i.e.\ the GNN collapses to nearest-neighbour.
+GNN+2-opt is therefore literally NN+2-opt: the learned initialization contributes nothing, not even as a different starting point.
+This suggests that for TSP at this scale, the value of a learned initialization is entirely subsumed by cheap local search, and that a policy-gradient objective with this greedy scoring scheme has no incentive to learn anything beyond nearest-neighbour behaviour.
 Christofides achieves tours within 5.6\% of the best (without any local search refinement), confirming its theoretical guarantee of $\leq 1.5 \cdot \text{OPT}$.
 
 \begin{figure}[h]
