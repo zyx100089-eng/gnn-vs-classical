@@ -1,58 +1,87 @@
 # GNNs vs. Proven Approximation Algorithms
 
-A rigorous empirical audit comparing Graph Neural Network solvers against classical approximation algorithms with **proven guarantees** on NP-hard combinatorial optimization problems.
+**Short answer: No.** On 600 Max-Cut instances, my GNN beats the best
+classical algorithm on 1.8% of graphs. On TSP, GNN+2-opt collapses to
+NN+2-opt. Failure prediction from graph features sits at chance
+(balanced accuracy 0.52).
 
-## The Question
+## Why I built this
 
-GNNs are increasingly proposed as solvers for NP-hard problems. But classical algorithms like Goemans-Williamson (Max-Cut), Christofides (TSP), and DSatur (Coloring) come with **mathematical guarantees** on solution quality. Do learned solvers actually beat these guarantees?
+I kept reading papers claiming GNNs can *solve* NP-hard problems like
+Max-Cut and TSP. But I'd also read about approximation algorithms with
+real guarantees — Goemans-Williamson (0.878·OPT), Christofides (1.5·OPT)
+— and I wanted to test one against the other on equal footing, myself,
+rather than trust either the papers or the hype. This project is that
+test, with the training code and results committed so it's reproducible.
 
-**Short answer: No.** On 600 Max-Cut instances the GNN beats the best classical algorithm on only 1.8% of graphs. On TSP the GNN+2-opt matches NN+2-opt — the GNN initialisation does not add value over nearest-neighbour. Failure prediction from graph features is at chance level (balanced accuracy 0.52, barely above random 0.50), because the GNN wins so rarely there is almost no signal to learn.
+I did not cherry-pick the outcome. I would have been happy to find the
+GNN won; instead it mostly lost, and losing is the interesting result.
 
-## Key Findings
+## What I did
 
-### Max-Cut: GNN wins 1.8% of 600 instances
-- Goemans-Williamson SDP achieves the best cut on most instances
-- GNN (with local search) beats the best classical algorithm on only 11/600 instances
-- GNN achieves ~96% of the best classical cut on average — competitive but inferior
-- GNN is significantly faster than SDP at large n
-- **Failure prediction is at chance**: with only 1.8% positive examples, logistic regression achieves balanced accuracy 0.52 and F1 0.12 — both near the trivial baseline. The GNN wins too rarely to learn a useful predictor.
+Three problems, three comparisons, one methodology:
 
-### TSP: GNN+2-opt ≈ NN+2-opt
-- Christofides + 2-opt consistently outperforms GNN + 2-opt
-- The GNN is trained with proper REINFORCE (policy gradient with log-probability of the sampled tour times the reward), but the learned embeddings do not produce better initial tours than nearest-neighbour
-- 2-opt local search erases the initialisation difference completely: the trained GNN collapses to nearest-neighbour (all pairwise embedding cosines = 1.0), so GNN+2-opt is literally NN+2-opt — see the paper for the mechanism
+1. Train a GNN solver (5-layer GIN) on each problem.
+2. Implement the classical baselines *with* their guarantees, from
+   scratch: Goemans-Williamson (SDP + random hyperplane rounding),
+   Christofides, DSatur, plus simpler baselines.
+3. Run both on the same held-out instances across six graph families
+   and report solution quality and runtime.
 
-### Graph Coloring: GNN vs DSatur
-- DSatur uses fewer colors on structured graphs
-- GNN struggles with regular and small-world graphs
+| Problem | GNN vs classical |
+|---|---|
+| Max-Cut | GNN wins 11/600 instances (1.8%); achieves ~96% of the best classical cut on average — competitive but inferior. Goemans-Williamson dominates |
+| TSP | GNN+2-opt ≈ NN+2-opt. Christofides+2-opt consistently wins. Trained GNN collapses to nearest-neighbour (embedding cosines all 1.0) |
+| Coloring | DSatur uses fewer colors on structured graphs; GNN struggles on regular and small-world graphs |
 
-## Honest Assessment
+## The honest caveats
 
-The GNN does not beat classical algorithms with proven guarantees. The failure-prediction experiment confirms that the GNN's rare wins are not predictable from graph structure — they are essentially noise. The GNN's advantage is speed (inference is faster than SDP), not solution quality.
+- **Did the GNN get a fair shot?** Mostly, but not fully. It got a
+  modest training budget (80 epochs on 2000 synthetic graphs), its
+  architecture is a plain 5-layer GIN, and Max-Cut was trained
+  unsupervised. Classical algorithms had decades of tuning behind
+  them. If anything, this *understates* the gap — a better-trained GNN
+  might close some of it — but the failure-prediction result suggests
+  the GNN's rare wins are essentially noise, not a recoverable signal.
+- **The speed claim, scoped.** "GNN inference is faster than SDP" is
+  only measured where SDP actually runs (n ≤ 200 in my experiments;
+  above that, my SDP falls back to spectral relaxation with a warning).
+  At the sizes where both run, SDP's runtime explodes and the GNN
+  wins on speed — but I did not measure SDP at large n because it
+  couldn't run.
+- **Failure prediction at 1.8% positives.** Balanced accuracy 0.52
+  with 52 positives out of 600 is almost a foregone conclusion — the
+  class imbalance makes any predictor trivially poor. The honest
+  statement is: with so few GNN wins, there is almost no signal to
+  learn from, and the data says so.
+- **GNN speed is not a solution-quality advantage.** The GNN's only
+  clear win is inference speed. It does not produce better solutions.
 
-## Algorithms Implemented
+## Algorithms implemented
 
 ### Classical (with guarantees)
+
 | Algorithm | Problem | Guarantee |
 |-----------|---------|-----------|
-| Random partition | Max-Cut | ≥ 0.5 · OPT |
-| Greedy local search | Max-Cut | ≥ 0.5 · OPT |
+| Random partition | Max-Cut | ≥ 0.5·OPT |
+| Greedy local search | Max-Cut | ≥ 0.5·OPT |
 | Spectral relaxation | Max-Cut | Based on λ_max(L) |
-| **Goemans-Williamson** | Max-Cut | **≥ 0.878 · OPT** |
-| Nearest Neighbor | TSP | O(log n) · OPT |
-| **Christofides** | TSP | **≤ 1.5 · OPT** |
+| **Goemans-Williamson** | Max-Cut | **≥ 0.878·OPT** |
+| Nearest Neighbour | TSP | O(log n)·OPT |
+| **Christofides** | TSP | **≤ 1.5·OPT** |
 | 2-opt local search | TSP | No guarantee |
 | Greedy / Welsh-Powell | Coloring | ≤ Δ+1 colors |
 | **DSatur** | Coloring | **Optimal on bipartite** |
 
 ### Learned (no guarantees)
+
 | Algorithm | Problem | Architecture |
 |-----------|---------|-------------|
 | GIN (unsupervised) | Max-Cut | 5-layer GIN + local search |
 | GIN (REINFORCE) | TSP | 5-layer GIN + policy gradient + greedy + 2-opt |
 | GIN (classification) | Coloring | 5-layer GIN + conflict repair |
 
-## Project Structure
+## Project structure
 
 ```
 src/
@@ -61,39 +90,68 @@ src/
 │   ├── maxcut/          # Random, Greedy, Spectral, Goemans-Williamson
 │   ├── tsp/             # Nearest Neighbor, Christofides, 2-opt
 │   └── coloring/        # Greedy, Welsh-Powell, DSatur
-├── gnn/models/          # GIN for Max-Cut, TSP, and Coloring
-├── gnn/training/        # Training loops
+├── gnn/
+│   ├── models/          # GIN for Max-Cut, TSP, and Coloring
+│   └── training/        # Training loops (incl. REINFORCE)
 ├── evaluation/          # Metrics, timing, solution comparison
 └── analysis/            # Failure prediction (balanced metrics)
 experiments/             # Reproducible experiment runners
 tests/                   # 27 verification tests
-paper/                   # LaTeX paper
+paper/                   # LaTeX write-up
 ```
 
-## Quick Start
+## Running it
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Run all tests
-python -m pytest tests/ -v
+python3 -m pytest tests/ -v
 
-# Run comparisons
-python experiments/run_maxcut_comparison.py
-python experiments/run_tsp_comparison.py
-python experiments/run_coloring_comparison.py
-
-# Run failure prediction analysis
-python experiments/run_failure_analysis.py
+python3 experiments/run_maxcut_comparison.py
+python3 experiments/run_tsp_comparison.py
+python3 experiments/run_coloring_comparison.py
+python3 experiments/run_failure_analysis.py
 ```
 
-## Mathematical Foundation
+## The maths behind the guarantees
 
-**Goemans-Williamson (Max-Cut):** Relax integer program to SDP over PSD matrices, round via random hyperplanes. The 0.878 guarantee comes from E[cut] = Σ w_ij · arccos(v_i · v_j) / π. (Falls back to spectral with a warning when the SDP solver fails or n > max_n.)
+**Goemans-Williamson (Max-Cut):** relax the integer program to an SDP
+over PSD matrices, round via random hyperplanes. The 0.878 guarantee
+comes from E[cut] = Σ w_ij·arccos(v_i·v_j)/π. (Falls back to spectral
+with a warning when the SDP solver fails or n > max_n — the fallback
+is flagged in the output, not silently.)
 
-**Christofides (TSP):** MST ≤ OPT (lower bound minus one edge). Min matching on odd vertices ≤ 0.5 · OPT. Combined: ≤ 1.5 · OPT.
+**Christofides (TSP):** MST ≤ OPT (a lower bound minus one edge), min
+matching on odd vertices ≤ 0.5·OPT, combined ≤ 1.5·OPT.
 
-**REINFORCE (TSP GNN):** The GNN produces node embeddings. A stochastic policy samples the next city from softmax(embedding_similarity / distance / temperature). The log-probability of the sampled tour times the advantage (reward minus baseline) gives the policy gradient. This is a proper policy gradient — the log-probability is computed from the actual stochastic choices, not detached.
+**REINFORCE (TSP GNN):** the GNN produces node embeddings; a stochastic
+policy samples the next city from softmax(embedding_similarity /
+distance / temperature); the log-probability of the sampled tour times
+the advantage gives the policy gradient. This is a proper policy
+gradient — the log-probability comes from the actual stochastic
+choices, not detached.
 
-**DSatur (Coloring):** Saturation-based vertex ordering produces optimal 2-colorings on bipartite graphs and near-optimal colorings on structured graphs.
+**DSatur (Coloring):** saturation-based vertex ordering produces
+optimal 2-colorings on bipartite graphs and near-optimal colorings on
+structured graphs.
+
+## What I'd do differently
+
+- Give the GNN a serious training budget (1000+ epochs, larger
+  architectures) before concluding — the current result is "the GNN
+  as trained here", not "GNNs in general".
+- Try a supervised Max-Cut baseline instead of unsupervised only.
+- Run SDP at n up to the solver's real limit instead of a fixed
+  max_n, and measure the fallback's effect on the speed comparison.
+- Add Gurobi / exact solvers as an upper bound reference.
+
+## What surprised me
+
+The TSP collapse. I expected the GNN's learned embeddings to at least
+give 2-opt a better starting point than nearest-neighbour. Instead,
+after training, every pairwise embedding cosine was 1.0 — the GNN
+learned to produce identical embeddings for all nodes. 2-opt then
+erased even that. It was the cleanest "the model learned nothing
+useful" result I've seen, and it's exactly why the comparison had to
+be empirical.
