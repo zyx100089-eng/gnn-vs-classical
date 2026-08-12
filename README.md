@@ -28,6 +28,17 @@ Three problems, three comparisons, one methodology:
 3. Run both on the same held-out instances across six graph families
    and report solution quality and runtime.
 
+![GNN win rate vs best classical, by graph size and family](docs/win_rate_heatmap.png)
+
+*Win rate of the GNN against the best classical solver, per graph
+family and size (from the Max-Cut comparison).*
+
+![Runtime vs graph size](docs/runtime_comparison.png)
+
+*Solver runtime vs graph size: the GNN's one clear advantage is
+inference speed. Note the caveat below — this is only measured where
+the SDP actually runs.*
+
 | Problem | GNN vs classical |
 |---|---|
 | Max-Cut | GNN wins 11/600 instances (1.8%); achieves ~96% of the best classical cut on average — competitive but inferior. Goemans-Williamson dominates |
