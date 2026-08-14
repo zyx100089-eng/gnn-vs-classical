@@ -146,6 +146,10 @@ pip install -r requirements.txt
 # 2. Tests first (27 tests: classical guarantees, GNN shapes, metrics)
 python3 -m pytest tests/ -v
 
+# 2b. Follow-up experiment (supervised GNN, 5x budget) — optional, ~30 min
+python3 experiments/run_supervised_maxcut.py
+python3 experiments/make_followup_figure.py
+
 # 3. Re-run the three comparisons (each trains a GNN, then evaluates
 #    on held-out instances across all graph families; results land in
 #    results/analysis/*.csv)
@@ -190,13 +194,56 @@ structured graphs.
 
 ## What I'd do differently
 
-- Give the GNN a serious training budget (1000+ epochs, larger
-  architectures) before concluding — the current result is "the GNN
-  as trained here", not "GNNs in general".
-- Try a supervised Max-Cut baseline instead of unsupervised only.
+- ~~Give the GNN a serious training budget~~ **Done — it did not change the
+  conclusion.** See the [follow-up experiment](#follow-up-supervised-training--5x-budget)
+  below: supervised training at 5× the original budget still wins 0.0% of
+  instances (relative 0.951 vs 0.956 unsupervised). The gap is not a
+  training-budget artefact.
+- ~~Try a supervised Max-Cut baseline instead of unsupervised only~~ **Done**
+  (spectral-relaxation labels, see below).
 - Run SDP at n up to the solver's real limit instead of a fixed
   max_n, and measure the fallback's effect on the speed comparison.
 - Add Gurobi / exact solvers as an upper bound reference.
+
+## Follow-up: supervised training + 5x budget
+
+The paper's conclusion ("the GNN loses, and the loss is not a training
+artefact") is only as strong as the training it was based on. This
+follow-up answers the two caveats above directly:
+
+1. **Supervised labels** from the spectral relaxation (a strong,
+   cheap teacher that achieves ~97.8% of the best classical cut),
+   instead of the original unsupervised cut-maximisation loss.
+2. **5× the training budget**: 300 epochs (vs 80), plus cosine LR
+   decay — the paper itself called the 80-epoch budget "modest".
+
+Same evaluation protocol as the paper: held-out instances across five
+graph families and three sizes (450 instances), vs random, greedy,
+spectral, and Goemans-Williamson.
+
+![Supervised vs unsupervised GNN relative performance](analysis/figures/followup/supervised_vs_unsupervised.png)
+
+| Setting | Win rate | GNN / best classical |
+|---|---|---|
+| Unsupervised (paper) | 1.8% | 0.956 |
+| **Supervised, 300 epochs (follow-up)** | **0.0%** | **0.951** |
+
+**The conclusion holds.** A supervised training signal and a serious
+budget do not close the gap — if anything the GNN is marginally
+further behind (0.951 vs 0.956 relative), consistent with the paper's
+failure-prediction result that its rare wins were noise, not a
+recoverable signal.
+
+Reproduce with:
+
+```bash
+python3 experiments/run_supervised_maxcut.py          # train + evaluate (~30 min)
+python3 experiments/make_followup_figure.py           # figure above
+```
+
+Results: `results/analysis/supervised_maxcut_comparison.csv`,
+training log `results/analysis/supervised_maxcut_training_log.csv`,
+weights `results/analysis/supervised_maxcut_gnn_weights.pt`.
 
 ## What surprised me
 
