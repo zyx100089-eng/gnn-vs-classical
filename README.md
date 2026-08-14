@@ -5,6 +5,10 @@ classical algorithm on 1.8% of graphs. On TSP, GNN+2-opt collapses to
 NN+2-opt. Failure prediction from graph features sits at chance
 (balanced accuracy 0.52).
 
+> **Full write-up:** [paper/main.pdf](paper/main.pdf) — a LaTeX paper
+> with the complete methodology, results tables, and analysis
+> (source: `paper/main.tex`).
+
 ## Why I built this
 
 I kept reading papers claiming GNNs can *solve* NP-hard problems like
@@ -124,6 +128,39 @@ python3 experiments/run_tsp_comparison.py
 python3 experiments/run_coloring_comparison.py
 python3 experiments/run_failure_analysis.py
 ```
+
+## Reproducing the paper
+
+Everything in `paper/main.pdf` is reproducible from the committed
+code and results. In order:
+
+```bash
+# 1. Environment
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Tests first (27 tests: classical guarantees, GNN shapes, metrics)
+python3 -m pytest tests/ -v
+
+# 3. Re-run the three comparisons (each trains a GNN, then evaluates
+#    on held-out instances across all graph families; results land in
+#    results/analysis/*.csv)
+python3 experiments/run_maxcut_comparison.py
+python3 experiments/run_tsp_comparison.py
+python3 experiments/run_coloring_comparison.py
+
+# 4. Failure-prediction analysis (reads the Max-Cut results CSV)
+python3 experiments/run_failure_analysis.py
+
+# 5. Rebuild the paper (LaTeX source in paper/main.tex)
+tectonic paper/main.tex   # or: pdflatex paper/main.tex
+```
+
+The committed `results/analysis/*.csv` files are the outputs of steps
+3–4 as run for the paper, so the figures and tables can be reproduced
+without re-running the experiments. The TSP GNN weights are committed
+(`results/analysis/tsp_gnn_weights.pt`) so the TSP collapse result
+can be inspected directly.
 
 ## The maths behind the guarantees
 
