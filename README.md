@@ -133,6 +133,41 @@ python3 experiments/run_coloring_comparison.py
 python3 experiments/run_failure_analysis.py
 ```
 
+## How to verify my work
+
+The headline numbers are each tied to a committed artifact. Cheapest
+first:
+
+```bash
+# 1. The 27 tests (fast, no GPU): classical guarantees, GNN shapes,
+#    evaluation metrics
+python3 -m pytest tests/ -v
+
+# 2. The headline numbers live in committed artifacts — check directly
+python3 - <<'EOF'
+import json, pandas as pd
+df = pd.read_csv("results/analysis/maxcut_comparison.csv")
+print("GNN win rate:", f"{df['gnn_wins'].mean():.1%}")      # expect ~1.8%
+print("GNN mean cut / best cut:", round(df["gnn_cut"].mean() /
+      df["best_classical_cut"].mean(), 3))                  # expect ~0.98
+                                                             # (per-instance ratio
+                                                             # in the paper is 0.956)
+j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
+print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.52
+EOF
+```
+
+| Headline claim | Artifact |
+|---|---|
+| GNN wins 1.8% of 600 Max-Cut instances | `results/analysis/maxcut_comparison.csv` (column `gnn_wins`) |
+| TSP GNN collapses to nearest-neighbour | `results/analysis/tsp_gnn_weights.pt` + `tsp_comparison.csv` (embedding-cosine analysis in the paper) |
+| DSatur beats GNN on coloring | `results/analysis/coloring_comparison.csv` |
+| Failure prediction at chance (balanced acc 0.52) | `analysis/figures/failure_prediction/prediction_results.json` || Follow-up: supervised + 5× budget still loses (0.0%) | `results/analysis/supervised_maxcut_comparison.csv` |
+
+To regenerate any artifact, run the corresponding step in
+[Reproducing the paper](#reproducing-the-paper) — every experiment
+trains its own GNN and evaluates on fresh held-out instances.
+
 ## Reproducing the paper
 
 Everything in `paper/main.pdf` is reproducible from the committed
