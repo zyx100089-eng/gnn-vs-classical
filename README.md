@@ -1,5 +1,9 @@
 # GNNs vs. Proven Approximation Algorithms
 
+[![Tests](https://github.com/zyx100089-eng/gnn-vs-classical/actions/workflows/tests.yml/badge.svg)](https://github.com/zyx100089-eng/gnn-vs-classical/actions/workflows/tests.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 **Short answer: No.** On 600 Max-Cut instances, my GNN beats the best
 classical algorithm on 1.8% of graphs. On TSP, GNN+2-opt collapses to
 NN+2-opt. Failure prediction from graph features sits at chance
