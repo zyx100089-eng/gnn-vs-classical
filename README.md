@@ -151,7 +151,7 @@ print("GNN win rate:", f"{df['gnn_wins'].mean():.1%}")      # expect ~1.8%
 print("GNN mean cut / best cut:", round(df["gnn_cut"].mean() /
       df["best_classical_cut"].mean(), 3))                  # expect ~0.98
                                                              # (per-instance ratio
-                                                             # in the paper is 0.956)
+                                                             # in the paper is 0.958)
 j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
 print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.52
 EOF
@@ -232,7 +232,7 @@ structured graphs.
 - ~~Give the GNN a serious training budget~~ **Done — it did not change the
   conclusion.** See the [follow-up experiment](#follow-up-supervised-training--5x-budget)
   below: supervised training at 5× the original budget still wins 0.0% of
-  instances (relative 0.951 vs 0.956 unsupervised). The gap is not a
+  instances (relative 0.951 vs 0.958 unsupervised). The gap is not a
   training-budget artefact.
 - ~~Try a supervised Max-Cut baseline instead of unsupervised only~~ **Done**
   (spectral-relaxation labels, see below).
@@ -260,12 +260,12 @@ spectral, and Goemans-Williamson.
 
 | Setting | Win rate | GNN / best classical |
 |---|---|---|
-| Unsupervised (paper) | 1.8% | 0.956 |
+| Unsupervised (paper) | 1.8% | 0.958 |
 | **Supervised, 300 epochs (follow-up)** | **0.0%** | **0.951** |
 
 **The conclusion holds.** A supervised training signal and a serious
 budget do not close the gap — if anything the GNN is marginally
-further behind (0.951 vs 0.956 relative), consistent with the paper's
+further behind (0.951 vs 0.958 relative), consistent with the paper's
 failure-prediction result that its rare wins were noise, not a
 recoverable signal.
 
