@@ -4,37 +4,42 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**Short answer: No.** On 600 Max-Cut instances, my GNN beats the best
-classical algorithm on 1.8% of graphs. On TSP, GNN+2-opt collapses to
-NN+2-opt. Failure prediction from graph features sits at chance
-(balanced accuracy 0.52).
+**The short version: I trained graph neural networks to solve NP-hard
+problems, pitted them against classical algorithms with proven
+guarantees, and the GNNs mostly lost.** Out of 600 Max-Cut instances
+my GNN beat the best classical algorithm on 11 of them (1.8%). On
+TSP it collapsed completely — its output was indistinguishable from
+nearest-neighbour. Predicting *when* the GNN would win turned out to
+be a chance-level task (balanced accuracy 0.52).
+
+I'm not reporting this because it's flattering. I'm reporting it
+because I ran the experiment properly and this is what happened.
 
 > **Full write-up:** [paper/main.pdf](paper/main.pdf) — a LaTeX paper
 > with the complete methodology, results tables, and analysis
 > (source: `paper/main.tex`).
 
-## Why I built this
+## Where this came from
 
 I kept reading papers claiming GNNs can *solve* NP-hard problems like
-Max-Cut and TSP. But I'd also read about approximation algorithms with
-real guarantees — Goemans-Williamson (0.878·OPT), Christofides (1.5·OPT)
-— and I wanted to test one against the other on equal footing, myself,
-rather than trust either the papers or the hype. This project is that
-test, with the training code and results committed so it's reproducible.
+Max-Cut and TSP. Meanwhile, classical algorithms with real guarantees
+have existed for decades — Goemans-Williamson gives you a cut within
+0.878 of optimal, Christofides a tour within 1.5 of optimal. Nobody
+seemed to be putting the two on equal footing. So I did.
 
-I did not cherry-pick the outcome. I would have been happy to find the
-GNN won; instead it mostly lost, and losing is the interesting result.
+The rules I set myself:
 
-## What I did
+1. Implement the classical baselines **with their guarantees**, from
+   scratch (no library calls hiding the hard part).
+2. Train a GNN solver for each problem.
+3. Run both on the same held-out instances across several graph
+   families, report quality **and** runtime.
 
-Three problems, three comparisons, one methodology:
-
-1. Train a GNN solver (5-layer GIN) on each problem.
-2. Implement the classical baselines *with* their guarantees, from
-   scratch: Goemans-Williamson (SDP + random hyperplane rounding),
-   Christofides, DSatur, plus simpler baselines.
-3. Run both on the same held-out instances across six graph families
-   and report solution quality and runtime.
+I did not cherry-pick the outcome. I genuinely expected the GNN to do
+better than it did. The moment I saw the first Max-Cut results — the
+GNN at 96% of the best classical cut on average, but winning almost
+nothing outright — I knew the interesting result was the failure, not
+a win.
 
 ![GNN win rate vs best classical, by graph size and family](docs/win_rate_heatmap.png)
 
@@ -47,13 +52,15 @@ family and size (from the Max-Cut comparison).*
 inference speed. Note the caveat below — this is only measured where
 the SDP actually runs.*
 
-| Problem | GNN vs classical |
+## The results, honestly
+
+| Problem | What happened |
 |---|---|
 | Max-Cut | GNN wins 11/600 instances (1.8%); achieves ~96% of the best classical cut on average — competitive but inferior. Goemans-Williamson dominates |
 | TSP | GNN+2-opt ≈ NN+2-opt. Christofides+2-opt consistently wins. Trained GNN collapses to nearest-neighbour (embedding cosines all 1.0) |
 | Coloring | DSatur uses fewer colors on structured graphs; GNN struggles on regular and small-world graphs |
 
-## The honest caveats
+## The caveats I have to state
 
 - **Did the GNN get a fair shot?** Mostly, but not fully. It got a
   modest training budget (80 epochs on 2000 synthetic graphs), its
@@ -135,8 +142,7 @@ python3 experiments/run_failure_analysis.py
 
 ## How to verify my work
 
-The headline numbers are each tied to a committed artifact. Cheapest
-first:
+Every headline number maps to a committed artifact. Cheapest first:
 
 ```bash
 # 1. The 27 tests (fast, no GPU): classical guarantees, GNN shapes,
@@ -227,19 +233,6 @@ choices, not detached.
 optimal 2-colorings on bipartite graphs and near-optimal colorings on
 structured graphs.
 
-## What I'd do differently
-
-- ~~Give the GNN a serious training budget~~ **Done — it did not change the
-  conclusion.** See the [follow-up experiment](#follow-up-supervised-training--5x-budget)
-  below: supervised training at 5× the original budget still wins 0.0% of
-  instances (relative 0.951 vs 0.958 unsupervised). The gap is not a
-  training-budget artefact.
-- ~~Try a supervised Max-Cut baseline instead of unsupervised only~~ **Done**
-  (spectral-relaxation labels, see below).
-- Run SDP at n up to the solver's real limit instead of a fixed
-  max_n, and measure the fallback's effect on the speed comparison.
-- Add Gurobi / exact solvers as an upper bound reference.
-
 ## Follow-up: supervised training + 5x budget
 
 The paper's conclusion ("the GNN loses, and the loss is not a training
@@ -279,6 +272,18 @@ python3 experiments/make_followup_figure.py           # figure above
 Results: `results/analysis/supervised_maxcut_comparison.csv`,
 training log `results/analysis/supervised_maxcut_training_log.csv`,
 weights `results/analysis/supervised_maxcut_gnn_weights.pt`.
+
+## What I'd do next
+
+- Give the GNN a genuinely large training budget (1000+ epochs,
+  bigger architecture) with an exact solver as an upper-bound
+  reference — I've done the 5× version; the 10× version would
+  settle the question more completely.
+- Try a supervised Max-Cut baseline with a different label source
+  (e.g. exact solutions on small graphs).
+- Run SDP at n up to the solver's real limit instead of a fixed
+  max_n, and measure the fallback's effect on the speed comparison.
+- Add Gurobi / exact solvers as an upper bound reference.
 
 ## What surprised me
 
