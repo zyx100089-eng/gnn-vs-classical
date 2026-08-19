@@ -168,7 +168,8 @@ EOF
 | GNN wins 1.8% of 600 Max-Cut instances | `results/analysis/maxcut_comparison.csv` (column `gnn_wins`) |
 | TSP GNN collapses to nearest-neighbour | `results/analysis/tsp_gnn_weights.pt` + `tsp_comparison.csv` (embedding-cosine analysis in the paper) |
 | DSatur beats GNN on coloring | `results/analysis/coloring_comparison.csv` |
-| Failure prediction at chance (balanced acc 0.52) | `analysis/figures/failure_prediction/prediction_results.json` || Follow-up: supervised + 5× budget still loses (0.0%) | `results/analysis/supervised_maxcut_comparison.csv` |
+| Failure prediction at chance (balanced acc 0.52) | `analysis/figures/failure_prediction/prediction_results.json` |
+| Follow-up: supervised + 5× budget still loses (0.0%) | `results/analysis/supervised_maxcut_comparison.csv` |
 
 To regenerate any artifact, run the corresponding step in
 [Reproducing the paper](#reproducing-the-paper) — every experiment
