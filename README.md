@@ -7,8 +7,9 @@
 **The short version: I trained graph neural networks to solve NP-hard
 problems, pitted them against classical algorithms with proven
 guarantees, and the GNNs mostly lost.** Out of 600 Max-Cut instances
-my GNN beat the best classical algorithm on 11 of them (1.8%). On
-TSP it collapsed completely — its output was indistinguishable from
+my GNN beat the best classical algorithm on 11 (1.8%), matched it
+exactly on 44 more (9.2% match-or-beat), and lost the remaining 545.
+On TSP it collapsed completely — its output was indistinguishable from
 nearest-neighbour. Predicting *when* the GNN would win turned out to
 be a chance-level task (balanced accuracy 0.52).
 
@@ -56,7 +57,7 @@ the SDP actually runs.*
 
 | Problem | What happened |
 |---|---|
-| Max-Cut | GNN wins 11/600 instances (1.8%); achieves ~96% of the best classical cut on average — competitive but inferior. Goemans-Williamson dominates |
+| Max-Cut | GNN wins 11/600 (1.8%), ties 44 (7.3%), loses 545 — 55/600 (9.2%) match-or-beat; achieves ~96% of the best classical cut on average — competitive but inferior. Goemans-Williamson dominates |
 | TSP | GNN+2-opt ≈ NN+2-opt. Christofides+2-opt consistently wins. Trained GNN collapses to nearest-neighbour (embedding cosines all 1.0) |
 | Coloring | DSatur uses fewer colors on structured graphs; GNN struggles on regular and small-world graphs |
 
@@ -76,12 +77,58 @@ the SDP actually runs.*
   wins on speed — but I did not measure SDP at large n because it
   couldn't run.
 - **Failure prediction at 1.8% positives.** Balanced accuracy 0.52
-  with 52 positives out of 600 is almost a foregone conclusion — the
-  class imbalance makes any predictor trivially poor. The honest
-  statement is: with so few GNN wins, there is almost no signal to
-  learn from, and the data says so.
+  with 11 positives out of 600 is almost a foregone conclusion — the
+  class imbalance makes any predictor trivially poor. (Counting the
+  44 exact ties as non-losses gives 55 positives, 9.2% — still
+  heavily imbalanced.) The honest statement is: with so few GNN wins,
+  there is almost no signal to learn from, and the data says so.
+- **Ties count as losses in the win-rate convention.** `gnn_wins`
+  uses a strict `>`; the 44 instances where the GNN exactly matches
+  the best classical cut are reported separately (`gnn_ties` column)
+  rather than folded into the win rate. Both numbers are in the CSV.
 - **GNN speed is not a solution-quality advantage.** The GNN's only
   clear win is inference speed. It does not produce better solutions.
+
+## Corrections from a post-publication audit
+
+An external audit of this repository found several issues. All are
+fixed in the code; the committed result artifacts predate some of the
+fixes, as noted.
+
+1. **"52 positives" was a typo.** An earlier version of the caveat
+   above said the failure-prediction task had 52 positives out of 600.
+   The correct number is **11** (1.8%): the committed
+   `maxcut_comparison.csv` (`gnn_wins` sums to 11) and
+   `prediction_results.json` (`majority_baseline` = 0.98167 = 1 −
+   11/600) always said 11, and the LaTeX paper was correct throughout.
+2. **Ties are now reported, not folded away.** The win-rate convention
+   is strict (`>`), so 44 exact ties with the best classical cut
+   counted as losses: 11 wins / 44 ties / 545 losses, i.e. 9.2%
+   match-or-beat. The CSV now carries a `gnn_ties` column and the
+   runner prints the full breakdown.
+3. **Evaluation seeds overlapped the training seed range.** Training
+   used Erdős-Rényi n=100 seeds 42–2041; the original evaluation seeds
+   (42 + 1000·i) put seeds 42 and 1042 — two of the 600 instances —
+   inside that range, i.e. two evaluation graphs were literally seen
+   in training. One of the 11 GNN wins was on such an instance.
+   `run_maxcut_comparison.py` now offsets evaluation seeds beyond the
+   training range. The committed CSV predates this fix; excluding both
+   affected rows, the win rate is 10/598 = 1.7%, so no headline
+   conclusion changes.
+4. **A `gw_fallback` column records whether GW was really GW.** The
+   Goemans-Williamson solver substitutes spectral relaxation (with a
+   warning) when the SDP solver fails; previously nothing in the
+   results CSV said whether that had happened. The runner now records
+   it per instance. In the committed run every `gw_cut` is non-null
+   (all sizes ≤ `max_n`), but whether the solver-status fallback ever
+   fired is not recoverable from the old CSV.
+5. **Failure prediction now scales inside the CV folds.** The
+   `StandardScaler` was previously fitted on all 600 rows before
+   cross-validation — each fold's scaling had seen its own held-out
+   data. The effect was negligible, but the form was wrong; the
+   logistic regression now wraps the scaler in a `Pipeline` so each
+   fold refits it on training data only. `prediction_results.json`
+   has been regenerated under this fix.
 
 ## Algorithms implemented
 
@@ -154,10 +201,11 @@ python3 - <<'EOF'
 import json, pandas as pd
 df = pd.read_csv("results/analysis/maxcut_comparison.csv")
 print("GNN win rate:", f"{df['gnn_wins'].mean():.1%}")      # expect ~1.8%
+print("GNN ties:", int((df["gnn_cut"] == df["best_classical_cut"]).sum()))  # expect 44
 print("GNN mean cut / best cut:", round(df["gnn_cut"].mean() /
       df["best_classical_cut"].mean(), 3))                  # expect ~0.98
-                                                             # (per-instance ratio
-                                                             # in the paper is 0.958)
+                                                              # (per-instance ratio
+                                                              # in the paper is 0.958)
 j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
 print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.52
 EOF
@@ -217,8 +265,8 @@ can be inspected directly.
 **Goemans-Williamson (Max-Cut):** relax the integer program to an SDP
 over PSD matrices, round via random hyperplanes. The 0.878 guarantee
 comes from E[cut] = Σ w_ij·arccos(v_i·v_j)/π. (Falls back to spectral
-with a warning when the SDP solver fails or n > max_n — the fallback
-is flagged in the output, not silently.)
+with a warning when the SDP solver fails or n > max_n — and the
+fallback is recorded in a `gw_fallback` column of the results CSV.)
 
 **Christofides (TSP):** MST ≤ OPT (a lower bound minus one edge), min
 matching on odd vertices ≤ 0.5·OPT, combined ≤ 1.5·OPT.

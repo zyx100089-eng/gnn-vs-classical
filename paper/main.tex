@@ -101,6 +101,10 @@ All GNN outputs are refined with local search post-processing.
 Each algorithm is evaluated on: (1) solution quality relative to the best algorithm, (2) wall-clock time, and (3) win rate against the best classical algorithm.
 All experiments run on CPU (Apple M3) for fair timing comparison.
 
+\subsection*{Erratum}
+
+A post-publication audit found that the original evaluation seeds (\texttt{42 + 1000\,i}) placed two of the 600 Max-Cut instances (Erd\H{o}s--R\'enyi, $n{=}100$, seeds 42 and 1042) inside the training seed range 42--2041: two evaluation graphs had been seen during training, and one of the 11 GNN wins occurred on such an instance. The experiment runner now offsets evaluation seeds beyond the training range. Excluding the two affected rows, the GNN win rate is 10/598 $= 1.7\%$, so no conclusion changes. The same audit prompted three reporting fixes in the repository: exact ties with the best classical cut (44 instances) are now reported alongside wins and losses (11/44/545) instead of being counted silently as losses; a \texttt{gw\_fallback} column records whenever Goemans-Williamson substituted the spectral relaxation; and the failure-prediction scaler is now fitted inside each cross-validation fold (a scikit-learn \texttt{Pipeline}) rather than on the full dataset---all failure-prediction numbers are unchanged at the reported precision.
+
 \section{Results}
 
 \subsection{Maximum Cut}
@@ -124,7 +128,7 @@ Goemans-Williamson & $\geq 0.878$ & \textbf{0.999} & \textbf{67.0\%} & 1.171 \\
 
 The GNN achieves competitive but inferior performance to the best classical algorithms.
 Notably, the Goemans-Williamson algorithm dominates despite being 60$\times$ slower at $n = 200$.
-The GNN wins on only 1.8\% (11/600) of instances.
+The GNN wins on only 1.8\% (11/600) of instances. A further 44 instances (7.3\%) end in exact ties with the best classical cut---9.2\% match-or-beat---and the remaining 545 are losses.
 
 \begin{figure}[h]
 \centering

@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import (
     roc_curve, auc, classification_report,
@@ -52,48 +53,51 @@ def run_failure_prediction(df: pd.DataFrame, fig_dir: Path):
     # Handle any remaining issues
     X = X.replace([np.inf, -np.inf], 0)
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
     # Majority-class baseline: always predict the more frequent class.
     majority_acc = max(y.mean(), 1 - y.mean())
 
-    print(f"Feature matrix: {X_scaled.shape}")
+    print(f"Feature matrix: {X.shape}")
     print(f"GNN win rate: {y.mean():.1%}")
     print(f"Majority-class baseline accuracy: {majority_acc:.3f}")
 
-    # Logistic Regression (interpretable)
-    lr = LogisticRegression(max_iter=1000, random_state=42, class_weight="balanced")
-    lr_acc = cross_val_score(lr, X_scaled, y, cv=5, scoring="accuracy")
-    lr_bal = cross_val_score(lr, X_scaled, y, cv=5, scoring="balanced_accuracy")
-    lr_f1 = cross_val_score(lr, X_scaled, y, cv=5, scoring="f1")
+    # Logistic Regression (interpretable). The scaler lives inside a
+    # Pipeline so each CV fold refits it on that fold's training data
+    # only — scaling the whole matrix up front would leak held-out
+    # statistics into every fold.
+    lr = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000, random_state=42, class_weight="balanced"),
+    )
+    lr_acc = cross_val_score(lr, X, y, cv=5, scoring="accuracy")
+    lr_bal = cross_val_score(lr, X, y, cv=5, scoring="balanced_accuracy")
+    lr_f1 = cross_val_score(lr, X, y, cv=5, scoring="f1")
     print(f"\nLogistic Regression (balanced class weights):")
     print(f"  CV accuracy:          {lr_acc.mean():.3f} ± {lr_acc.std():.3f}")
     print(f"  CV balanced accuracy: {lr_bal.mean():.3f} ± {lr_bal.std():.3f}")
     print(f"  CV F1:                {lr_f1.mean():.3f} ± {lr_f1.std():.3f}")
     print(f"  Majority baseline:    {majority_acc:.3f}")
 
-    lr.fit(X_scaled, y)
+    lr.fit(X, y)
 
-    # Random Forest (accurate)
+    # Random Forest (accurate) — tree model, no scaling needed
     rf = RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
-    rf_acc = cross_val_score(rf, X_scaled, y, cv=5, scoring="accuracy")
-    rf_bal = cross_val_score(rf, X_scaled, y, cv=5, scoring="balanced_accuracy")
-    rf_f1 = cross_val_score(rf, X_scaled, y, cv=5, scoring="f1")
+    rf_acc = cross_val_score(rf, X, y, cv=5, scoring="accuracy")
+    rf_bal = cross_val_score(rf, X, y, cv=5, scoring="balanced_accuracy")
+    rf_f1 = cross_val_score(rf, X, y, cv=5, scoring="f1")
     print(f"\nRandom Forest (balanced class weights):")
     print(f"  CV accuracy:          {rf_acc.mean():.3f} ± {rf_acc.std():.3f}")
     print(f"  CV balanced accuracy: {rf_bal.mean():.3f} ± {rf_bal.std():.3f}")
     print(f"  CV F1:                {rf_f1.mean():.3f} ± {rf_f1.std():.3f}")
     print(f"  Majority baseline:    {majority_acc:.3f}")
 
-    rf.fit(X_scaled, y)
+    rf.fit(X, y)
 
     # --- Figure: Feature importance ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Logistic regression coefficients
+    # Logistic regression coefficients (on standardized features)
     feature_names = [c.replace("prop_", "") for c in available_cols]
-    coefs = lr.coef_[0]
+    coefs = lr.named_steps["logisticregression"].coef_[0]
     sorted_idx = np.argsort(np.abs(coefs))[::-1]
     ax1.barh(range(len(coefs)), coefs[sorted_idx], color=["green" if c > 0 else "red" for c in coefs[sorted_idx]])
     ax1.set_yticks(range(len(coefs)))
@@ -127,7 +131,7 @@ def run_failure_prediction(df: pd.DataFrame, fig_dir: Path):
     ]:
         # Out-of-fold predictions for an honest ROC
         from sklearn.model_selection import cross_val_predict
-        y_prob = cross_val_predict(model_obj, X_scaled, y, cv=cv, method="predict_proba")[:, 1]
+        y_prob = cross_val_predict(model_obj, X, y, cv=cv, method="predict_proba")[:, 1]
         fpr, tpr, _ = roc_curve(y, y_prob)
         roc_auc = auc(fpr, tpr)
         ax.plot(fpr, tpr, color=color, label=f"{name} (AUC={roc_auc:.3f})")

@@ -67,9 +67,14 @@ def christofides_tsp(dist_matrix: np.ndarray) -> tuple[list, float]:
             tour.append(u)
             visited.add(u)
     if len(tour) < n:
-        for v in range(n):
-            if v not in visited:
-                tour.append(v)
+        # Unreachable in practice: the Eulerian circuit of
+        # MST + matching covers every vertex, so shortcutting visits
+        # them all. If this ever fires, silently appending vertices in
+        # index order would produce a badly wrong tour — fail loudly
+        # instead of guessing.
+        raise RuntimeError(
+            f"Eulerian shortcutting missed {n - len(tour)} of {n} vertices"
+        )
 
     length = sum(dist_matrix[tour[i]][tour[(i + 1) % n]] for i in range(n))
     return tour, length

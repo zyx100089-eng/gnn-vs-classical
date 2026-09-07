@@ -11,6 +11,7 @@ import argparse
 import json
 import sys
 import time
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -85,7 +86,11 @@ def main():
             print(f"\n--- {family}, n={n} ({args.instances} instances) ---")
 
             for inst in range(args.instances):
-                seed_i = args.seed + inst * 1000
+                # Offset evaluation seeds beyond the training seed
+                # range (training uses base_seed .. base_seed +
+                # train_graphs - 1) so no evaluation instance can be a
+                # graph the GNN saw during training.
+                seed_i = args.seed + args.train_graphs + inst * 1000
                 G = generate_instance(family, n, seed=seed_i)
                 props = compute_properties(G)
 
@@ -114,15 +119,25 @@ def main():
 
                 # Goemans-Williamson
                 if n <= args.gw_max_n:
-                    res = evaluate_solver(
-                        goemans_williamson, G,
-                        n_roundings=50, seed=seed_i, max_n=args.gw_max_n,
-                    )
+                    with warnings.catch_warnings(record=True) as wlist:
+                        warnings.simplefilter("always")
+                        res = evaluate_solver(
+                            goemans_williamson, G,
+                            n_roundings=50, seed=seed_i, max_n=args.gw_max_n,
+                        )
                     row["gw_cut"] = res["cut_value"]
                     row["gw_time"] = res["runtime"]
+                    # Both fallback paths (n > max_n and failed SDP
+                    # status) warn before substituting spectral; record
+                    # it so the artifact shows whether GW was really GW.
+                    row["gw_fallback"] = any(
+                        "falling back to spectral" in str(w.message)
+                        for w in wlist
+                    )
                 else:
                     row["gw_cut"] = np.nan
                     row["gw_time"] = np.nan
+                    row["gw_fallback"] = True  # spectral by design above max_n
 
                 # GNN
                 res = evaluate_solver(
@@ -138,6 +153,7 @@ def main():
                     classical_cuts.append(row["gw_cut"])
                 row["best_classical_cut"] = max(classical_cuts)
                 row["gnn_wins"] = 1 if row["gnn_cut"] > row["best_classical_cut"] else 0
+                row["gnn_ties"] = 1 if row["gnn_cut"] == row["best_classical_cut"] else 0
 
                 all_results.append(row)
 
@@ -265,6 +281,14 @@ def main():
     print("=" * 60)
     print(f"\nTotal instances: {len(df)}")
     print(f"GNN overall win rate: {df['gnn_wins'].mean():.1%}")
+    n_win = int(df["gnn_wins"].sum())
+    n_tie = int((df["gnn_cut"] == df["best_classical_cut"]).sum())
+    n_loss = len(df) - n_win - n_tie
+    print(f"Win / tie / loss: {n_win} / {n_tie} / {n_loss} "
+          f"(match-or-beat rate {(n_win + n_tie) / len(df):.1%})")
+    if "gw_fallback" in df.columns and df["gw_fallback"].any():
+        print(f"WARNING: GW fell back to spectral on "
+              f"{int(df['gw_fallback'].sum())} instances")
     print(f"\nBy family:")
     for fam in families:
         sub = df[df["family"] == fam]
