@@ -176,7 +176,11 @@ def main() -> None:
     for family in families:
         for n in sizes:
             for inst in range(args.instances):
-                seed_i = args.seed + inst * 1000
+                # Offset evaluation seeds beyond the training seed range
+                # (training uses base_seed .. base_seed + train_graphs - 1)
+                # so no evaluation instance can be a graph the GNN saw in
+                # training — same formula as run_maxcut_comparison.py.
+                seed_i = args.seed + args.train_graphs + inst * 1000
                 G = generate_instance(family, n, seed=seed_i)
                 row = {"family": family, "n": n, "instance": inst,
                        "m": G.number_of_edges(),
@@ -216,7 +220,22 @@ def main() -> None:
     print("=" * 60)
     print(f"Instances: {len(df)} | GNN win rate: {df['gnn_wins'].mean():.1%}")
     print(f"GNN avg relative to best classical: {df['gnn_relative'].mean():.3f}")
-    print(f"\nvs paper (unsupervised, 80 epochs, 2000 graphs): 1.8% wins")
+
+    # Compare against the paper's unsupervised run on the same protocol
+    # (same sizes / families / instance counts). The paper ran four sizes;
+    # this follow-up uses the sizes in `sizes`, so restrict to those so the
+    # two are directly comparable.
+    paper_csv = Path("results/analysis/maxcut_comparison.csv")
+    if paper_csv.exists():
+        paper = pd.read_csv(paper_csv)
+        paper = paper[paper["n"].isin(sizes)]
+        print(f"\nvs paper (unsupervised, n in {sizes}): "
+              f"{paper['gnn_wins'].sum()}/{len(paper)} = "
+              f"{paper['gnn_wins'].mean():.1%} wins, "
+              f"relative {(paper['gnn_cut'] / paper['best_classical_cut']).mean():.3f}")
+    else:
+        print("\nvs paper (unsupervised): paper results not found; "
+              "run run_maxcut_comparison.py first.")
     print("\nBy family:")
     for fam in families:
         sub = df[df.family == fam]

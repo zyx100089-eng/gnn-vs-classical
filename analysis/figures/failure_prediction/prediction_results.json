@@ -1,10 +1,16 @@
 {
   "lr_accuracy": 0.5183333333333333,
+  "lr_accuracy_std": 0.2740336556783572,
   "lr_balanced_accuracy": 0.6073156598580327,
+  "lr_balanced_accuracy_std": 0.24526539692871357,
   "lr_f1": 0.22889916379734382,
+  "lr_f1_std": 0.38606886328119344,
   "rf_accuracy": 0.82,
+  "rf_accuracy_std": 0.2124983660067897,
   "rf_balanced_accuracy": 0.5647399681297987,
+  "rf_balanced_accuracy_std": 0.10004204920213972,
   "rf_f1": 0.03463203463203463,
+  "rf_f1_std": 0.042767407914211145,
   "majority_baseline": 0.98,
   "top_lr_features": [
     [

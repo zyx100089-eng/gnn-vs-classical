@@ -213,10 +213,11 @@ print("GNN mean cut / best cut:", round(df["gnn_cut"].mean() /
       df["best_classical_cut"].mean(), 3))                  # expect ~0.977
                                                               # (per-instance ratio
                                                               # in the paper is 0.958)
-j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
-print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.61
-EOF
-```
+ j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
+ print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.61
+ print("balanced acc std:", round(j["lr_balanced_accuracy_std"], 2)) # expect 0.25
+ EOF
+ ```
 
 | Headline claim | Artifact |
 |---|---|
@@ -224,7 +225,7 @@ EOF
 | TSP GNN collapses to nearest-neighbour | `results/analysis/tsp_gnn_weights.pt` + `tsp_comparison.csv` (embedding-cosine analysis in the paper) |
 | DSatur beats GNN on coloring | `results/analysis/coloring_comparison.csv` |
 | Failure prediction near chance (balanced acc 0.61) | `analysis/figures/failure_prediction/prediction_results.json` |
-| Follow-up: supervised + 5× budget still loses (0.0%) | `results/analysis/supervised_maxcut_comparison.csv` |
+| Follow-up: supervised + 5× budget still loses (0.2%) | `results/analysis/supervised_maxcut_comparison.csv` |
 
 To regenerate any artifact, run the corresponding step in
 [Reproducing the paper](#reproducing-the-paper) — every experiment
@@ -312,7 +313,7 @@ three sizes so the two rows cover the same protocol.
 | Setting | Win rate | GNN / best classical |
 |---|---|---|
 | Unsupervised (paper, n ≤ 100) | 7/450 = 1.6% | 0.954 |
-| **Supervised, 300 epochs (follow-up)** | **0/450 = 0.0%** | **0.951** |
+| **Supervised, 300 epochs (follow-up)** | **1/450 = 0.2%** | **0.951** |
 
 **The conclusion holds.** A supervised training signal and a serious
 budget do not close the gap — if anything the GNN is marginally

@@ -167,11 +167,17 @@ def run_failure_prediction(df: pd.DataFrame, fig_dir: Path):
 
     return {
         "lr_accuracy": lr_acc.mean(),
+        "lr_accuracy_std": lr_acc.std(),
         "lr_balanced_accuracy": lr_bal.mean(),
+        "lr_balanced_accuracy_std": lr_bal.std(),
         "lr_f1": lr_f1.mean(),
+        "lr_f1_std": lr_f1.std(),
         "rf_accuracy": rf_acc.mean(),
+        "rf_accuracy_std": rf_acc.std(),
         "rf_balanced_accuracy": rf_bal.mean(),
+        "rf_balanced_accuracy_std": rf_bal.std(),
         "rf_f1": rf_f1.mean(),
+        "rf_f1_std": rf_f1.std(),
         "majority_baseline": majority_acc,
         "top_lr_features": [(feature_names[i], float(coefs[i]))
                            for i in sorted_idx[:5]],
