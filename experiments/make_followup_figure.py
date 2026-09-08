@@ -22,6 +22,12 @@ fig_dir.mkdir(parents=True, exist_ok=True)
 paper = pd.read_csv(results_dir / "maxcut_comparison.csv")
 followup = pd.read_csv(results_dir / "supervised_maxcut_comparison.csv")
 
+# The follow-up ran on sizes {20, 50, 100}; restrict the paper's
+# (600-instance, 4-size) comparison to the same three sizes so the two
+# bars are on the same protocol.
+follow_sizes = sorted(followup["n"].unique())
+paper = paper[paper["n"].isin(follow_sizes)]
+
 paper["gnn_relative"] = paper["gnn_cut"] / paper["best_classical_cut"].clip(lower=1)
 followup["gnn_relative"] = followup["gnn_cut"] / followup["best_classical_cut"].clip(lower=1)
 

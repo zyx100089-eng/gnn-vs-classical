@@ -19,11 +19,11 @@
 \begin{abstract}
 Graph Neural Networks (GNNs) have been proposed as learned solvers for NP-hard combinatorial optimization problems, yet their performance relative to classical algorithms with \emph{proven approximation guarantees} remains poorly characterized.
 We conduct a rigorous empirical audit comparing GIN-based GNN solvers against classical algorithms on three canonical NP-hard problems: Maximum Cut, Travelling Salesman Problem, and Graph Coloring.
-For Max-Cut, the Goemans-Williamson SDP relaxation ($\alpha \geq 0.878$) dominates the GNN across all graph families, with the GNN winning only 1.8\% of 600 instances.
+For Max-Cut, the Goemans-Williamson SDP relaxation ($\alpha \geq 0.878$) dominates the GNN across all graph families, with the GNN winning only 2.0\% of 600 instances.
 For TSP, NN+2-opt local search matches or outperforms the GNN+2-opt on all 90 Euclidean instances, with the GNN providing no advantage in initialization quality.
 For Graph Coloring, DSatur produces colorings using 3.4$\times$ fewer colors than the GNN, which wins 0\% of 600 instances.
-We further show that spectral graph properties---particularly the Laplacian spectral radius, degree variance, and spectral gap---are the strongest predictors of GNN failure, yet the prediction task itself is at chance: balanced accuracy 0.52 and F1 0.12, with the raw accuracy (57\% LR, 78\% RF) no better than the 98.2\% majority-class baseline.
-The GNN's primary advantage is inference speed (up to 60$\times$ faster than SDP), not solution quality.
+We further show that spectral graph properties---particularly the Laplacian spectral radius, maximum Laplacian eigenvalue, and spectral gap---are the strongest predictors of GNN failure, yet the prediction task is near chance given the tiny positive class: logistic-regression balanced accuracy 0.61 (with a wide cross-validated spread) and F1 0.23, with the raw accuracy (52\% LR, 82\% RF) no better than the 98\% majority-class baseline.
+The GNN's primary advantage is inference speed, not solution quality: evaluating the trained network takes milliseconds where solving the SDP takes seconds at the largest sizes measured (runtimes are machine-dependent; see Table~\ref{tab:maxcut}).
 These results demonstrate that for practitioners, classical algorithms with mathematical guarantees remain the reliable baseline, and GNNs should be evaluated against them---not just against naive heuristics.
 \end{abstract}
 
@@ -46,7 +46,7 @@ A GNN that beats a random partition on Max-Cut is unremarkable; one that beats t
     \item \textbf{Maximum Cut}: GNN (GIN + local search) vs.\ Goemans-Williamson SDP ($\alpha \geq 0.878$), spectral relaxation, and greedy, across 600 instances from 5 graph families.
     \item \textbf{Travelling Salesman Problem}: GNN vs.\ Christofides ($\alpha \leq 1.5$) and 2-opt local search, on 90 Euclidean instances.
     \item \textbf{Graph Coloring}: GNN vs.\ DSatur \cite{brelaz1979new} and Welsh-Powell, across 600 instances from 5 graph families.
-    \item \textbf{Failure Prediction}: We train classifiers on spectral graph properties to predict when GNNs fail. The task is at chance---balanced accuracy 0.52, F1 0.12---because the GNN wins too rarely (1.8\%) to learn a useful predictor; the raw accuracy (57\% LR, 78\% RF) is no better than the 98.2\% majority-class baseline.
+    \item \textbf{Failure Prediction}: We train classifiers on spectral graph properties to predict when GNNs fail. With only 2.0\% positive examples, the task is near chance and high-variance---logistic-regression balanced accuracy 0.61 (wide cross-validated spread), F1 0.23---and the raw accuracy (52\% LR, 82\% RF) is no better than the 98\% majority-class baseline.
 \end{enumerate}
 
 \section{Background}
@@ -103,11 +103,12 @@ All experiments run on CPU (Apple M3) for fair timing comparison.
 
 \subsection*{Erratum}
 
-A post-publication audit found that the original evaluation seeds (\texttt{42 + 1000\,i}) placed two of the 600 Max-Cut instances (Erd\H{o}s--R\'enyi, $n{=}100$, seeds 42 and 1042) inside the training seed range 42--2041: two evaluation graphs had been seen during training, and one of the 11 GNN wins occurred on such an instance. The experiment runner now offsets evaluation seeds beyond the training range. Excluding the two affected rows, the GNN win rate is 10/598 $= 1.7\%$, so no conclusion changes. The same audit prompted three reporting fixes in the repository: exact ties with the best classical cut (44 instances) are now reported alongside wins and losses (11/44/545) instead of being counted silently as losses; a \texttt{gw\_fallback} column records whenever Goemans-Williamson substituted the spectral relaxation; and the failure-prediction scaler is now fitted inside each cross-validation fold (a scikit-learn \texttt{Pipeline}) rather than on the full dataset---all failure-prediction numbers are unchanged at the reported precision.
+A post-publication audit found that the original evaluation seeds (\texttt{42 + 1000\,i}) placed two of the 600 Max-Cut instances (Erd\H{o}s--R\'enyi, $n{=}100$, seeds 42 and 1042) inside the training seed range 42--2041: two evaluation graphs had been seen during training, and one of the original 11 GNN wins occurred on such an instance. The experiment runner now offsets evaluation seeds beyond the training range (\texttt{42 + 2000 + 1000\,i}), and the Max-Cut comparison in this version of the paper was regenerated end to end under the fixed runner. The reported results (Section~\ref{sec:maxcut}) therefore come from 600 evaluation instances that the GNN never saw during training. The same audit prompted three further reporting fixes in the repository: exact ties with the best classical cut are now reported alongside wins and losses instead of being counted silently as losses; a \texttt{gw\_fallback} column records whenever Goemans-Williamson substituted the spectral relaxation (none fired in the regenerated run); and the failure-prediction scaler is now fitted inside each cross-validation fold (a scikit-learn \texttt{Pipeline}) rather than on the full dataset.
 
 \section{Results}
 
 \subsection{Maximum Cut}
+\label{sec:maxcut}
 
 \begin{table}[h]
 \centering
@@ -117,18 +118,21 @@ A post-publication audit found that the original evaluation seeds (\texttt{42 + 
 \toprule
 \textbf{Algorithm} & \textbf{Guarantee} & \textbf{Avg Cut/Best} & \textbf{Win Rate} & \textbf{Avg Time (s)} \\
 \midrule
-Random & $\geq 0.5$ & 0.670 & 0.0\% & $< 0.001$ \\
-Greedy & $\geq 0.5$ & 0.945 & 0.2\% & 0.003 \\
-Spectral & --- & 0.978 & 8.3\% & 0.003 \\
-Goemans-Williamson & $\geq 0.878$ & \textbf{0.999} & \textbf{67.0\%} & 1.171 \\
-\textbf{GNN + local search} & --- & 0.958 & 1.8\% & 0.053 \\
+Random & $\geq 0.5$ & 0.671 & 0.0\% & $< 0.001$ \\
+Greedy & $\geq 0.5$ & 0.945 & 0.2\% & 0.002 \\
+Spectral & --- & 0.979 & 7.2\% & 0.003 \\
+Goemans-Williamson & $\geq 0.878$ & \textbf{0.999} & \textbf{66.2\%} & 3.48 \\
+\textbf{GNN + local search} & --- & 0.958 & 2.0\% & 0.032 \\
 \bottomrule
 \end{tabular}
+\caption*{\footnotesize Avg times are wall-clock means over the committed run on one machine
+(Goemans-Williamson dominated by the $n{=}200$ SDP solves); runtimes are
+environment- and threading-dependent and are reported only to show ordering.}
 \end{table}
 
 The GNN achieves competitive but inferior performance to the best classical algorithms.
-Notably, the Goemans-Williamson algorithm dominates despite being 60$\times$ slower at $n = 200$.
-The GNN wins on only 1.8\% (11/600) of instances. A further 44 instances (7.3\%) end in exact ties with the best classical cut---9.2\% match-or-beat---and the remaining 545 are losses.
+Notably, the Goemans-Williamson algorithm dominates on quality despite its SDP solve being far slower at $n = 200$ (Fig.~\ref{fig:maxcut}).
+The GNN wins on only 2.0\% (12/600) of instances. A further 45 instances (7.5\%) end in exact ties with the best classical cut---9.5\% match-or-beat---and the remaining 543 are losses.
 
 \begin{figure}[h]
 \centering
@@ -222,16 +226,16 @@ We train logistic regression and random forest classifiers to predict whether th
     \includegraphics[width=\textwidth]{../analysis/figures/failure_prediction/performance_vs_spectral_gap.png}
     \caption{GNN performance vs.\ spectral gap $\lambda_2$}
 \end{subfigure}
-\caption{Failure prediction. With only 1.8\% positive examples (GNN wins), the majority-class baseline achieves 98.2\% accuracy by always predicting ``classical wins.'' The logistic-regression classifier with balanced class weights achieves balanced accuracy 0.52 and F1 0.12---both near chance. Spectral features are the strongest predictors but the signal is too weak to learn a useful classifier.}
+\caption{Failure prediction. With only 2.0\% positive examples (GNN wins), the majority-class baseline achieves 98\% accuracy by always predicting ``classical wins.'' The logistic-regression classifier with balanced class weights achieves balanced accuracy 0.61 and F1 0.23, but the cross-validated spread is wide ($\pm 0.25$) given the tiny positive class, so the estimate is consistent with near-chance behaviour. Spectral features are the strongest predictors but the signal is too weak to learn a reliable classifier.}
 \label{fig:failure}
 \end{figure}
 
 \textbf{Key findings:}
 \begin{itemize}
-    \item The minimum eigenvalue of the adjacency matrix ($\lambda_{\min}(A)$) is the single strongest predictor of classical dominance (logistic regression), with the Laplacian spectral radius, degree variance, and spectral gap leading the random-forest importances.
+    \item The minimum eigenvalue of the adjacency matrix ($\lambda_{\min}(A)$) is the single strongest predictor of classical dominance (logistic regression), with the Laplacian spectral radius, maximum Laplacian eigenvalue, and spectral gap leading the random-forest importances (see Fig.~\ref{fig:failure}).
     \item Graphs with low spectral gap (e.g., Watts-Strogatz small-world) are hardest for GNNs.
     \item Barab\'asi-Albert graphs, with their heavy-tailed degree distribution, are most amenable to GNNs.
-    \item \textbf{However}, with only 1.8\% positive examples, the failure prediction task is essentially at chance: balanced accuracy 0.52, F1 0.12. The majority-class baseline (always predict ``classical wins'') achieves 98.2\% raw accuracy---higher than any learned model. The GNN wins too rarely to learn a useful predictor.
+    \item \textbf{However}, with only 2.0\% positive examples, the failure prediction task is near chance and high-variance: balanced accuracy 0.61 (LR) / 0.56 (RF), F1 0.23 / 0.03. The majority-class baseline (always predict ``classical wins'') achieves 98\% raw accuracy, higher than the learned models' 52\% (LR) / 82\% (RF). With so few GNN wins there is little signal to learn a reliable predictor.
 \end{itemize}
 
 \section{Discussion}
@@ -241,7 +245,7 @@ We train logistic regression and random forest classifiers to predict whether th
 Our results suggest a clear decision rule:
 \begin{enumerate}
     \item \textbf{If solution quality is paramount}: use classical algorithms. The Goemans-Williamson SDP, Christofides, and DSatur all provide stronger solutions with mathematical guarantees.
-    \item \textbf{If runtime is the bottleneck}: GNNs offer amortized $O(n)$ inference after training. At $n = 200$, GNN inference is 60$\times$ faster than the GW SDP.
+    \item \textbf{If runtime is the bottleneck}: GNNs offer amortized $O(n)$ inference after training. At $n = 200$, GNN inference was orders of magnitude faster than the GW SDP in the committed run (see Table~\ref{tab:maxcut}); runtimes are environment-dependent.
     \item \textbf{If you need to process millions of instances}: GNNs provide a fast, consistent baseline. But pair them with local search refinement.
 \end{enumerate}
 
@@ -266,7 +270,7 @@ This suggests that for TSP, the value of the GNN is entirely subsumed by cheap l
 We presented a rigorous empirical comparison of GNN-based solvers against classical approximation algorithms on three NP-hard problems.
 Across Max-Cut, TSP, and Graph Coloring, classical algorithms with proven guarantees consistently outperform GNNs in solution quality.
 The GNN's advantage lies in inference speed, not approximation quality.
-We also attempted failure prediction from graph features, but found the task is essentially at chance: the GNN wins too rarely (1.8\%) to learn a useful classifier, and the majority-class baseline outperforms all learned models in raw accuracy.
+We also attempted failure prediction from graph features, but with only 2.0\% positive examples the task is near chance and high-variance (LR balanced accuracy 0.61 $\pm$ 0.25, F1 0.23): the GNN wins too rarely to support a reliable classifier, and the majority-class baseline (98\% raw accuracy) exceeds the learned models in raw accuracy.
 
 These results do not diminish the promise of learned combinatorial solvers---they sharpen its scope.
 GNNs are most valuable when speed is critical, when distributional regularity can be exploited, and when paired with classical refinement.
