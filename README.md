@@ -4,18 +4,38 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**The short version: I trained graph neural networks to solve NP-hard
-problems, pitted them against classical algorithms with proven
-guarantees, and the GNNs mostly lost.** Out of 600 Max-Cut instances
-my GNN beat the best classical algorithm on 12 (2.0%), matched it
-exactly on 45 more (9.5% match-or-beat), and lost the remaining 543.
-On TSP it collapsed completely — its output was indistinguishable from
-nearest-neighbour. Predicting *when* the GNN would win turned out to
-be a near-chance, high-variance task (logistic-regression balanced
-accuracy 0.61 ± 0.25, F1 0.23).
+**The short version, in two halves.**
+
+*First, an autopsy.* My original Max-Cut pipeline was a controlled way
+to show where performance actually comes from: I gave the GNN a 1-opt
+local search after inference that (mostly) no classical method got, and
+a control found that a **coin flip plus that identical local search
+scored within 1% of the "trained GNN" pipeline** — and the network's
+raw output, without the search, was *worse than a coin flip* (it cut
+21% of the edges; a coin flip cuts ~50%). There is a provable reason:
+with the constant node features the code used, the training loss has an
+exact critical point at the uniform output p=0.5, whose value is
+precisely the random-cut baseline — and the network starts there.
+
+*Then, the fix.* With three changes — symmetry-breaking **Laplacian
+positional-encoding features**, a **best-of-50 Bernoulli decoding**
+matching the rounding budget Goemans-Williamson gets, and an edge-count-
+**normalised loss** with per-graph normalisation — the same 5-layer GIN
+became a credible heuristic: it beats the coin-flip control
+decisively (mean ratio 1.042, 95% bootstrap CI [1.039, 1.046]) and
+edges out the spectral method (1.008, [1.006, 1.010]), but still loses
+to **Goemans-Williamson** (0.987, [0.985, 0.988]) — which, with or
+without the local search, reaches the *exact* optimum on every instance
+we can verify (n ≤ 20). On TSP the GNN still collapses to
+nearest-neighbour. Predicting *when* the GNN wins is genuinely at
+chance (LR balanced accuracy 0.54 ± 0.18).
 
 I'm not reporting this because it's flattering. I'm reporting it
-because I ran the experiment properly and this is what happened.
+because the ablation is the interesting result — and it puts this repo
+squarely in a live literature debate (Angelini & Ricci-Tersenghi 2023;
+Boettcher 2023, critiquing Schuetz et al.'s PI-GNN): **much of what a
+naive GNN pipeline appears to achieve comes from the classical
+post-processing bolted onto it, not from the network.**
 
 > **Full write-up:** [paper/main.pdf](paper/main.pdf) — a LaTeX paper
 > with the complete methodology, results tables, and analysis
@@ -36,41 +56,39 @@ The rules I set myself:
 2. Train a GNN solver for each problem.
 3. Run both on the same held-out instances across several graph
    families, report quality **and** runtime.
-
-I did not cherry-pick the outcome. I genuinely expected the GNN to do
-better than it did. The moment I saw the first Max-Cut results — the
-GNN at 96% of the best classical cut on average, but winning almost
-nothing outright — I knew the interesting result was the failure, not
-a win.
+4. Ablate: give *every* method — including a coin flip — the same
+   post-processing, so the comparison measures the right thing.
 
 ![GNN win rate vs best classical, by graph size and family](docs/win_rate_heatmap.png)
 
-*Win rate of the GNN against the best classical solver, per graph
+*Win rate of the fixed GNN against the best classical solver, per graph
 family and size (from the Max-Cut comparison).*
 
 ![Runtime vs graph size](docs/runtime_comparison.png)
 
 *Solver runtime vs graph size: the GNN's one clear advantage is
 inference speed. Note the caveat below — this is only measured where
-the SDP actually runs.*
+the SDP actually runs, and it excludes training cost.*
 
 ## The results, honestly
 
 | Problem | What happened |
 |---|---|
-| Max-Cut | GNN wins 12/600 (2.0%), ties 45 (7.5%), loses 543 — 57/600 (9.5%) match-or-beat; achieves ~96% of the best classical cut on average — competitive but inferior. Goemans-Williamson dominates |
+| Max-Cut | Fixed GNN + shared local search: wins 68/600 (11.3%), ties 160 (26.7%), loses 372 — 38% match-or-beat; 98.6% of the best classical cut; beats the coin-flip control (ratio 1.042) and spectral (1.008), loses to GW (0.987). GW refined finds the exact optimum on all verifiable instances. Goemans-Williamson dominates |
 | TSP | GNN+2-opt ≈ NN+2-opt. Christofides+2-opt consistently wins. Trained GNN collapses to nearest-neighbour (embedding cosines all 1.0) |
-| Coloring | DSatur uses fewer colors on structured graphs; GNN struggles on regular and small-world graphs |
+| Coloring | GNN genuinely loses: 0 wins / 3 ties / 597 losses, using 15.4 colours on average vs DSatur's 5.4 — not a tie artefact |
 
 ## The caveats I have to state
 
-- **Did the GNN get a fair shot?** Mostly, but not fully. It got a
-  modest training budget (80 epochs on 2000 synthetic graphs), its
-  architecture is a plain 5-layer GIN, and Max-Cut was trained
-  unsupervised. Classical algorithms had decades of tuning behind
-  them. If anything, this *understates* the gap — a better-trained GNN
-  might close some of it — but the failure-prediction result is too
-  noisy to claim the GNN's rare wins are a recoverable signal.
+- **The runtime comparison is not apples-to-apples by construction.**
+  The GNN's `gnn_time` measures one inference (50 Bernoulli samples +
+  local search) and excludes the training cost entirely (80 epochs over
+  2000 graphs). GW's time is per-instance SDP solving with no
+  amortisation across instances. If you solve many instances from a
+  fixed distribution, the GNN's training cost amortises to zero; for a
+  handful of instances it never pays for itself. There is a break-even
+  number of instances below which the SDP is also the better time
+  trade — I report the curves and let the reader place it.
 - **The speed claim, scoped.** "GNN inference is faster than SDP" is
   only measured where SDP actually runs (n ≤ 200 in my experiments;
   above that, my SDP falls back to spectral relaxation with a warning).
@@ -79,63 +97,141 @@ the SDP actually runs.*
   couldn't run. The committed timing columns are wall-clock means from
   one run on one machine and are not portable; treat them as ordering,
   not absolutes.
-- **Failure prediction at 2.0% positives.** Balanced accuracy 0.61
-  (± 0.25 across CV folds) with only 12 positives out of 600 is a
-  fragile estimate — the class imbalance makes any predictor weak.
-  (Counting the 45 exact ties as non-losses gives 57 positives, 9.5%
-  — still heavily imbalanced.) The honest statement is: with so few
-  GNN wins, there is little signal to learn from, and the result
-  does not support a reliable predictor.
+- **`sdp_bound` is a proxy, not a certificate.** The SDP relaxation's
+  exact optimum upper-bounds every max cut; the committed value is the
+  objective at the solver's (approximate, SCS) solution, so ratios to it
+  are indicative only. The rigorous certificates are the brute-forced
+  exact optima for n ≤ 20 (150 instances), where GW achieves ratio 1.000
+  on every instance.
+- **best_classical_cut is an oracle over baselines.** The headline
+  "win vs the best classical algorithm" compares the GNN against
+  max(greedy, spectral, GW) — an upward-biased oracle. The pairwise
+  head-to-heads (GNN vs GW alone: mean ratio 0.987, still a loss) are
+  in the stats output and the paper, and the conclusion survives the
+  bias.
 - **Ties count as losses in the win-rate convention.** `gnn_wins`
-  uses a strict `>`; the 45 instances where the GNN exactly matches
-  the best classical cut are reported separately (`gnn_ties` column)
-  rather than folded into the win rate. Both numbers are in the CSV.
+  uses a strict `>`; exact matches with the best classical cut are
+  reported separately (`gnn_ties` column). For Max-Cut: 68 wins / 160
+  ties / 372 losses. Both numbers are in the CSV.
+- **Trained on one family, one seed per model — but multi-seed tested.**
+  The GNN trains on Erdős–Rényi n=100 only; everything else is
+  out-of-distribution. The committed canonical run is seed 42; seeds 43
+  and 44 give 49 and 60 wins (8.2% and 10.0%) with the same 0.987
+  relative performance, so the headline is not a lucky seed. The
+  ID/OOD split is in the stats output: in-distribution the GNN reaches
+  0.994 of the best classical cut and wins 36.7% of the n=100 ER slice.
 - **GNN speed is not a solution-quality advantage.** The GNN's only
   clear win is inference speed. It does not produce better solutions.
 
+## The ablation: what actually does the work
+
+Every method below runs on the same 600 held-out instances; every
+method that wants the 1-opt local search gets the same one
+(`run_maxcut_ablation.py`, full table in
+`results/analysis/maxcut_ablation.csv`, statistics via
+`run_maxcut_stats.py`).
+
+| Method | mean cut / edges | wins / ties / losses vs all others |
+|---|---|---|
+| Coin flip, no refinement | 0.500 | 0.0% / 0.0% / 100.0% |
+| Coin flip + 1-opt LS | 0.714 | 0.0% / 5.7% / 94.3% |
+| Greedy (= coin flip + LS) | 0.712 | 0.0% / 4.8% / 95.2% |
+| **GNN (original, broken), raw output** | **0.211** | — |
+| GNN (original, broken) + LS | 0.722 | — |
+| GNN (fixed), raw 50-sample output | 0.674 | 0.3% / 18.7% / 81.0% |
+| **GNN (fixed) + LS (canonical)** | **0.745** | 1.8% / 25.8% / 72.3% |
+| Spectral, no refinement | 0.685 | 0.0% / 6.2% / 93.8% |
+| Spectral + its LS | 0.740 | 1.8% / 19.5% / 78.7% |
+| Goemans-Williamson (50 roundings) | 0.755 | 0.0% / 52.2% / 47.8%* |
+| GW + 1-opt LS | 0.758 | 38.5% / 55.7% / 5.8% |
+| *SDP relaxation objective* | *0.790* | *(upper-bound proxy)* |
+| *Exact optimum (n ≤ 20)* | *0.805* | *(150 instances)* |
+
+\* GW's row loses only to GW+LS, which refines GW's own output — GW
+can never "win" against a strictly-improved version of itself.
+
+Reading it honestly:
+
+- **In the original setup, the network was worse than nothing.** Its raw
+  thresholded output cut 21% of edges — a coin flip cuts ~50%. The
+  entire reported performance came from the local search. A coin flip
+  + the same LS scored within 1% of the "trained GNN" pipeline (mean
+  ratio 0.9895) and beat it on 30.8% of instances head-to-head. The
+  broken run's results are preserved as `maxcut_comparison_broken.csv`
+  so this control is reproducible from committed artifacts.
+- **Why it failed (provable):** the loss is quadratic around the
+  uniform output. With constant node features, all-p=0.5 is an exact
+  critical point whose value is exactly the random baseline, and
+  message passing cannot distinguish nodes there. The epoch-1 loss of
+  the original committed run sits on that baseline (within batch-sampling
+  variation; log preserved as `maxcut_training_log_broken.csv`);
+  80 epochs of cosine-annealed training crawled to 63% of edges and
+  stopped. Worse: with *iid random* features the signal is averaged
+  away across five layers of neighbourhood aggregation (per-node output
+  std ≈ 0.002), and with plain LayerNorm the per-node signal is
+  normalised away entirely (100× collapse — tried and discarded).
+- **The fixes that worked:** Laplacian positional-encoding features
+  (top-4 eigenvectors of L + normalised degree — smooth, survive
+  aggregation, and tie the model to the spectral relaxation), an
+  O(1)-scale head initialisation (the saddle has zero gradient, so a
+  near-zero init stays there forever), best-of-50 Bernoulli decoding
+  (the same rounding budget GW gets), an edge-count-normalised loss,
+  and per-graph GraphNorm instead of BatchNorm.
+- **After the fixes** the raw output is genuinely informative (0.674 vs
+  the coin flip's 0.499), and with the shared local search the GNN
+  beats greedy/rand+LS and spectral with CIs excluding 1.0, and still
+  loses to GW by 1.3% (CI [0.985, 0.988]). **GW refined with the same
+  local search dominates everything (38.5% outright wins)** and hits
+  the exact optimum on every instance we can brute-force.
+- This is the same failure mode Angelini & Ricci-Tersenghi and
+  Boettcher documented for Schuetz et al.'s PI-GNN: a learned pipeline
+  whose apparent quality is largely the classical post-processing
+  underneath it.
+
 ## Corrections from a post-publication audit
 
-An external audit of this repository found several issues. All are
-fixed in the code, and the Max-Cut comparison has since been
-regenerated from scratch under the fixed runner — so the committed
-Max-Cut artifacts are now clean rather than corrected in place.
+Two rounds. Round 1 fixed reporting and protocol; round 2 (an ablation
+audit) found the model itself was broken and rebuilt it.
 
-1. **"52 positives" was a typo.** An earlier version of the caveat
-   said the failure-prediction task had 52 positives out of 600. The
-   correct number was **11** (1.8%) in the original run. The Max-Cut
-   run has since been regenerated (see item 3), and the committed
-   `maxcut_comparison.csv` now has 12 `gnn_wins` (2.0%) with a
-   `majority_baseline` of 0.98 = 1 − 12/600 in `prediction_results.json`.
-2. **Ties are now reported, not folded away.** The win-rate convention
-   is strict (`>`), so exact ties with the best classical cut count as
-   losses rather than wins. In the regenerated run: 12 wins / 45 ties /
-   543 losses, i.e. 9.5% match-or-beat. The CSV carries a `gnn_ties`
-   column and the runner prints the full breakdown.
-3. **Evaluation seeds overlapped the training seed range.** Training
-   used Erdős-Rényi n=100 seeds 42–2041; the original evaluation seeds
-   (42 + 1000·i) put seeds 42 and 1042 — two of the 600 instances —
-   inside that range, i.e. two evaluation graphs were literally seen
-   in training. One of the original 11 GNN wins was on such an
-   instance. `run_maxcut_comparison.py` now offsets evaluation seeds
-   beyond the training range (42 + 2000 + 1000·i), and I re-ran the
-   comparison end to end under the fixed runner. The committed
-   `maxcut_comparison.csv` is the output of that clean run: 600 fresh
-   instances, none of which the GNN saw in training. The GNN wins
-   12/600 = 2.0% (12 wins / 45 ties / 543 losses), so no headline
-   conclusion changes — Goemans-Williamson still dominates.
-4. **A `gw_fallback` column records whether GW was really GW.** The
-   Goemans-Williamson solver substitutes spectral relaxation (with a
-   warning) when the SDP solver fails; the runner records this per
-   instance. In the regenerated run no `gw_fallback` fired (all sizes
-   ≤ `max_n`, SDP status optimal on every instance), so every `gw_cut`
-   in the committed CSV is a genuine SDP result.
-5. **Failure prediction now scales inside the CV folds.** The
-   `StandardScaler` was previously fitted on all 600 rows before
-   cross-validation — each fold's scaling had seen its own held-out
-   data. The effect was negligible, but the form was wrong; the
-   logistic regression now wraps the scaler in a `Pipeline` so each
-   fold refits it on training data only. `prediction_results.json`
-   has been regenerated under this fix.
+### Round 1 — reporting and protocol
+
+1. **"52 positives" was a typo.** The failure-prediction caveat had
+   said 52 positives out of 600; the correct number was 11 (1.8%).
+2. **Ties are now reported, not folded away.** Strict-`>` win rates
+   silently counted exact ties as losses; `gnn_ties` columns and
+   three-way breakdowns are reported everywhere.
+3. **Evaluation seeds overlapped the training seed range** (seeds 42
+   and 1042 were literally seen in training). All runners now offset
+   evaluation seeds beyond the training range, and the artifacts were
+   regenerated under the fixed runners.
+4. **A `gw_fallback` column records whether GW was really GW** (the
+   SDP-status fallback now emits a warning and is logged; none fired).
+5. **Failure prediction scales inside CV folds** (scaler fitted within
+   a `Pipeline`, per fold).
+6. **The trained Max-Cut model is committed** (`maxcut_gnn_weights.pt`),
+   so the headline result can be reproduced and inspected directly.
+
+### Round 2 — the ablation audit (this rewrite)
+
+7. **The original GNN pipeline was a coin flip in disguise.** A
+   random-init control with the identical local search matched the
+   "trained GNN" within 1%, and the raw network output was worse than a
+   coin flip (0.21 vs ~0.50 of edges cut). Root cause: an exact
+   critical point of the loss at the uniform output with constant node
+   features. Documented as the negative control above.
+8. **The model was rebuilt** with symmetry-breaking Laplacian
+   positional-encoding features, O(1) logit initialisation,
+   best-of-50 Bernoulli decoding, edge-count-normalised loss, and
+   per-graph GraphNorm, then retrained on three seeds with a held-out
+   validation split and checkpoint selection. The fixed model beats the
+   coin-flip control (1.042 [1.039, 1.046]) and the spectral method
+   (1.008 [1.006, 1.010]), and still loses to Goemans-Williamson
+   (0.987 [0.985, 0.988]).
+9. **Headline metrics changed.** The win rate alone is the wrong
+   headline; every comparison is now reported as win/tie/loss plus
+   mean approximation ratios with paired-bootstrap CIs and Wilcoxon
+   signed-rank tests, split in-distribution vs out-of-distribution
+   (`run_maxcut_stats.py`).
 
 ## Algorithms implemented
 
@@ -207,25 +303,38 @@ python3 -m pytest tests/ -v
 python3 - <<'EOF'
 import json, pandas as pd
 df = pd.read_csv("results/analysis/maxcut_comparison.csv")
-print("GNN win rate:", f"{df['gnn_wins'].mean():.1%}")      # expect 2.0%
-print("GNN ties:", int((df["gnn_cut"] == df["best_classical_cut"]).sum()))  # expect 45
+print("GNN win rate:", f"{df['gnn_wins'].mean():.1%}")      # expect 11.3%
+print("GNN ties:", int((df["gnn_cut"] == df["best_classical_cut"]).sum()))  # expect 160
 print("GNN mean cut / best cut:", round(df["gnn_cut"].mean() /
-      df["best_classical_cut"].mean(), 3))                  # expect ~0.977
-                                                              # (per-instance ratio
-                                                              # in the paper is 0.958)
- j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
- print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.61
- print("balanced acc std:", round(j["lr_balanced_accuracy_std"], 2)) # expect 0.25
- EOF
- ```
+      df["best_classical_cut"].mean(), 3))                  # expect ~0.991
+ab = pd.read_csv("results/analysis/maxcut_ablation.csv")
+import numpy as np
+print("coin-flip+LS / GNN+LS mean ratio:", round((ab["rand_ls"]/ab["gnn_ls"]).mean(), 3))
+                                                            # expect ~0.961 (fixed model)
+print("GNN raw output (no LS) mean cut/edges:",
+      round((ab["gnn_nols"]/ab["m"]).mean(), 3))            # expect ~0.674
+# the negative control, from the preserved broken run:
+b = pd.read_csv("results/analysis/maxcut_comparison_broken.csv")
+bm = b[["family","n","instance","gnn_cut"]].merge(
+     ab[["family","n","instance","rand_ls"]], on=["family","n","instance"])
+print("coin-flip+LS / broken GNN+LS mean ratio:", round((bm["rand_ls"]/bm["gnn_cut"]).mean(), 3))
+                                                            # expect ~0.990 (the headline)
+j = json.load(open("analysis/figures/failure_prediction/prediction_results.json"))
+print("balanced acc:", round(j["lr_balanced_accuracy"], 2)) # expect 0.54
+print("balanced acc std:", round(j["lr_balanced_accuracy_std"], 2)) # expect 0.18
+EOF
+```
 
 | Headline claim | Artifact |
 |---|---|
-| GNN wins 2.0% of 600 Max-Cut instances | `results/analysis/maxcut_comparison.csv` (column `gnn_wins`) |
+| GNN wins 11.3% of 600 Max-Cut instances (fixed model) | `results/analysis/maxcut_comparison.csv` (column `gnn_wins`) |
+| The refinement, not the network, did the original work | `results/analysis/maxcut_ablation.csv` (`gnn_nols`, `rand_ls`, `rand_nols`) |
+| Fixed GNN beats coin-flip control / spectral, loses to GW | `python3 experiments/run_maxcut_stats.py` (ratios, CIs, Wilcoxon) |
+| GW + local search finds the exact optimum (n ≤ 20) | `results/analysis/maxcut_ablation.csv` (`gw_plus_ls`/`exact_opt`) |
 | TSP GNN collapses to nearest-neighbour | `results/analysis/tsp_gnn_weights.pt` + `tsp_comparison.csv` (embedding-cosine analysis in the paper) |
 | DSatur beats GNN on coloring | `results/analysis/coloring_comparison.csv` |
-| Failure prediction near chance (balanced acc 0.61) | `analysis/figures/failure_prediction/prediction_results.json` |
-| Follow-up: supervised + 5× budget still loses (0.2%) | `results/analysis/supervised_maxcut_comparison.csv` |
+| Failure prediction at chance (balanced acc 0.54) | `analysis/figures/failure_prediction/prediction_results.json` |
+| Follow-up: supervised + 5× budget still loses (0.9%) | `results/analysis/supervised_maxcut_comparison.csv` |
 
 To regenerate any artifact, run the corresponding step in
 [Reproducing the paper](#reproducing-the-paper) — every experiment
@@ -255,18 +364,25 @@ python3 experiments/run_maxcut_comparison.py
 python3 experiments/run_tsp_comparison.py
 python3 experiments/run_coloring_comparison.py
 
-# 4. Failure-prediction analysis (reads the Max-Cut results CSV)
+# 4. Ablation study (controls, SDP bounds, exact optima for n<=20;
+#    needs results/analysis/maxcut_comparison.csv + the committed
+#    maxcut_gnn_weights.pt) and its statistics
+python3 experiments/run_maxcut_ablation.py   # ~15 min
+python3 experiments/run_maxcut_stats.py
+
+# 5. Failure-prediction analysis (reads the Max-Cut results CSV)
 python3 experiments/run_failure_analysis.py
 
-# 5. Rebuild the paper (LaTeX source in paper/main.tex)
+# 6. Rebuild the paper (LaTeX source in paper/main.tex)
 tectonic paper/main.tex   # or: pdflatex paper/main.tex
 ```
 
 The committed `results/analysis/*.csv` files are the outputs of steps
-3–4 as run for the paper, so the figures and tables can be reproduced
-without re-running the experiments. The TSP GNN weights are committed
-(`results/analysis/tsp_gnn_weights.pt`) so the TSP collapse result
-can be inspected directly.
+3–5 as run for the paper, so the figures and tables can be reproduced
+without re-running the experiments. The Max-Cut and TSP GNN weights are
+committed (`results/analysis/maxcut_gnn_weights.pt`,
+`results/analysis/tsp_gnn_weights.pt`) so both headline results can be
+reproduced and inspected directly.
 
 ## The maths behind the guarantees
 
@@ -312,13 +428,18 @@ three sizes so the two rows cover the same protocol.
 
 | Setting | Win rate | GNN / best classical |
 |---|---|---|
-| Unsupervised (paper, n ≤ 100) | 7/450 = 1.6% | 0.954 |
-| **Supervised, 300 epochs (follow-up)** | **1/450 = 0.2%** | **0.951** |
+| Unsupervised (rebuilt, n ≤ 100) | 32/450 = 7.1% | 0.984 |
+| **Supervised, 300 epochs (follow-up)** | **4/450 = 0.9%** | **0.963** |
 
-**The conclusion holds.** A supervised training signal and a serious
-budget do not close the gap — if anything the GNN is marginally
-further behind (0.951 vs 0.954 relative), consistent with the paper's
-failure-prediction result that its rare wins are not a recoverable
+**The conclusion holds — and then some.** A supervised training signal
+and a 5× budget do not close the gap: on the same 450-instance protocol
+the supervised model is *worse* (0.963 vs 0.984 relative; 0.9% vs 7.1%
+wins). Fitting the spectral-relaxation labels directly makes the
+network imitate that teacher rather than maximise the cut, and the
+imitation is no better than the teacher's own thresholded partition —
+so the learned component still adds nothing over the classical method
+it was trained to copy. This is consistent with the paper's
+failure-prediction result: the GNN's rare wins are not a recoverable
 signal.
 
 Reproduce with:

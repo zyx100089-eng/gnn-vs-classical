@@ -141,7 +141,8 @@ def main():
 
                 # GNN
                 res = evaluate_solver(
-                    lambda g, **kw: gnn_solve_maxcut(model, g, device=device),
+                    lambda g, **kw: gnn_solve_maxcut(model, g, device=device,
+                                                     seed=seed_i),
                     G,
                 )
                 row["gnn_cut"] = res["cut_value"]

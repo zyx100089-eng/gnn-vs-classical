@@ -19,12 +19,12 @@
 \begin{abstract}
 Graph Neural Networks (GNNs) have been proposed as learned solvers for NP-hard combinatorial optimization problems, yet their performance relative to classical algorithms with \emph{proven approximation guarantees} remains poorly characterized.
 We conduct a rigorous empirical audit comparing GIN-based GNN solvers against classical algorithms on three canonical NP-hard problems: Maximum Cut, Travelling Salesman Problem, and Graph Coloring.
-For Max-Cut, the Goemans-Williamson SDP relaxation ($\alpha \geq 0.878$) dominates the GNN across all graph families, with the GNN winning only 2.0\% of 600 instances.
-For TSP, NN+2-opt local search matches or outperforms the GNN+2-opt on all 90 Euclidean instances, with the GNN providing no advantage in initialization quality.
-For Graph Coloring, DSatur produces colorings using 3.4$\times$ fewer colors than the GNN, which wins 0\% of 600 instances.
-We further show that spectral graph properties---particularly the Laplacian spectral radius, maximum Laplacian eigenvalue, and spectral gap---are the strongest predictors of GNN failure, yet the prediction task is near chance given the tiny positive class: logistic-regression balanced accuracy 0.61 (with a wide cross-validated spread) and F1 0.23, with the raw accuracy (52\% LR, 82\% RF) no better than the 98\% majority-class baseline.
-The GNN's primary advantage is inference speed, not solution quality: evaluating the trained network takes milliseconds where solving the SDP takes seconds at the largest sizes measured (runtimes are machine-dependent; see Table~\ref{tab:maxcut}).
-These results demonstrate that for practitioners, classical algorithms with mathematical guarantees remain the reliable baseline, and GNNs should be evaluated against them---not just against naive heuristics.
+An ablation-driven audit of our own initial Max-Cut pipeline produced the decisive finding: with constant node features, the unsupervised cut loss has an exact critical point at the uniform output whose value is precisely the random-cut baseline, so a naively-trained GNN is indistinguishable from a coin flip that receives the same local-search refinement (mean ratio 0.990 between the two), and the network's raw output is \emph{worse} than a coin flip (0.21 vs.\ \textasciitilde0.50 of edges cut) --- echoing the critique Angelini \& Ricci-Tersenghi and Boettcher levelled at Schuetz et al.'s PI-GNN.
+Rebuilt with symmetry-breaking Laplacian positional-encoding features, an $O(1)$ logit initialisation, a best-of-50 Bernoulli decoding matched to the Goemans-Williamson rounding budget, an edge-count-normalised loss, and per-graph normalisation, the same 5-layer GIN becomes a credible heuristic on 600 held-out instances: it beats the coin-flip control (mean ratio 1.042, 95\% CI [1.039, 1.046]) and the spectral method (1.008 [1.006, 1.010]), but still loses to Goemans-Williamson (0.987 [0.985, 0.988]) --- and GW refined with the same local search finds the exact optimum on every instance small enough to brute-force ($n \leq 20$).
+We report win/tie/loss three-ways, approximation ratios with paired-bootstrap confidence intervals, Wilcoxon signed-rank tests, and in-distribution vs.\ out-of-distribution splits across three training seeds.
+For TSP, NN+2-opt local search matches or outperforms the GNN+2-opt on all 90 Euclidean instances; for Graph Coloring the GNN genuinely loses (0 wins / 3 ties / 597 losses, 15.4 vs.\ 5.4 mean colours against DSatur).
+The GNN's primary advantage is inference speed, not solution quality.
+These results demonstrate that for practitioners, classical algorithms with mathematical guarantees remain the reliable baseline, and that learned pipelines must be ablated against the classical post-processing they contain before any claim about the learned component is made.
 \end{abstract}
 
 \section{Introduction}
@@ -40,13 +40,14 @@ However, a troubling gap exists in the literature: GNN solvers are typically com
 This creates an inflated impression of GNN effectiveness.
 A GNN that beats a random partition on Max-Cut is unremarkable; one that beats the Goemans-Williamson SDP relaxation \cite{goemans1995improved} would be extraordinary.
 
-\textbf{Contributions.} We provide a rigorous empirical audit comparing GNN solvers against the strongest classical algorithms on three problems:
+\textbf{Contributions.} We provide a rigorous empirical audit comparing GNN solvers against the strongest classical algorithms on three problems, with ablations that isolate where performance actually comes from:
 
 \begin{enumerate}
-    \item \textbf{Maximum Cut}: GNN (GIN + local search) vs.\ Goemans-Williamson SDP ($\alpha \geq 0.878$), spectral relaxation, and greedy, across 600 instances from 5 graph families.
+    \item \textbf{Maximum Cut}: GNN (GIN + shared local search) vs.\ Goemans-Williamson SDP ($\alpha \geq 0.878$), spectral relaxation, greedy, and a coin-flip control with the identical refinement, across 600 instances from 5 graph families, three training seeds, with paired-bootstrap CIs and exact optima for $n \leq 20$.
     \item \textbf{Travelling Salesman Problem}: GNN vs.\ Christofides ($\alpha \leq 1.5$) and 2-opt local search, on 90 Euclidean instances.
     \item \textbf{Graph Coloring}: GNN vs.\ DSatur \cite{brelaz1979new} and Welsh-Powell, across 600 instances from 5 graph families.
-    \item \textbf{Failure Prediction}: We train classifiers on spectral graph properties to predict when GNNs fail. With only 2.0\% positive examples, the task is near chance and high-variance---logistic-regression balanced accuracy 0.61 (wide cross-validated spread), F1 0.23---and the raw accuracy (52\% LR, 82\% RF) is no better than the 98\% majority-class baseline.
+    \item \textbf{Failure Prediction}: We train classifiers on spectral graph properties to predict when the GNN pipeline wins. With 11.3\% positive examples the task remains at chance (LR balanced accuracy 0.54 $\pm$ 0.18, F1 0.21) --- too little signal to support a reliable predictor.
+    \item \textbf{A negative-control ablation} showing that a naively-trained GNN's apparent performance is almost entirely the classical post-processing it contains, and an analysis of \emph{why} (a provable critical point of the loss at the uniform output), with the architectural fixes that turn the network into a credible heuristic.
 \end{enumerate}
 
 \section{Background}
@@ -71,9 +72,12 @@ DSatur \cite{brelaz1979new} is a widely-used heuristic that is optimal for bipar
 \subsection{Graph Neural Networks for Combinatorial Optimization}
 
 GNNs learn to map graph-structured inputs to node or edge-level predictions through message-passing layers \cite{xu2019powerful}.
-For combinatorial optimization, the typical approach is unsupervised: the GNN outputs soft assignments (e.g., partition probabilities for Max-Cut), trained with a loss that directly encodes the objective \cite{khalil2017learning, schuetz2022combinatorial}.
+For combinatorial optimization, the typical approach is unsupervised: the GNN outputs soft assignments (e.g., partition probabilities for Max-Cut), trained with a loss that directly encodes the objective \cite{khalil2017learning, karalias2020erdos, schuetz2022combinatorial}.
+This line of work is contested: Angelini and Ricci-Tersenghi \cite{angelini2023modern} and Boettcher \cite{boettcher2023inability} showed that greedy algorithms running in almost linear time beat Schuetz et al.'s physics-inspired GNN (PI-GNN) \cite{schuetz2022combinatorial} on sparse instances, and that apparent GNN performance can be an artefact of weak baselines or of the classical post-processing attached to the learned pipeline.
+Our audit reaches the same conclusion from the inside, by ablating our own pipeline down to a coin-flip control.
 
 We use the Graph Isomorphism Network (GIN) \cite{xu2019powerful} throughout, as it is as expressive as the 1-WL test (the most expressive \emph{standard} message-passing GNN; higher-order GNNs are strictly more expressive).
+Karalias and Loukas \cite{karalias2020erdos} derive probabilistic penalty losses whose decoding samples from the learned per-node distribution --- the best-of-many-rounding scheme we adopt for decoding.
 
 \section{Experimental Setup}
 
@@ -90,20 +94,34 @@ We test generalization by training on one family and evaluating on five:
 
 Graph sizes: $n \in \{20, 50, 100, 200\}$, with 30 instances per (family, size) pair, totaling 600 instances per problem.
 
-\subsection{GNN Architecture}
+\subsection{GNN Architecture, and the Three Fixes}
 
-All GNN solvers use a 5-layer GIN with 128-dimensional hidden states and batch normalization.
+All GNN solvers use a 5-layer GIN with 128-dimensional hidden states.
 For Max-Cut, the output is a per-node sigmoid probability; for Coloring, a softmax over 20 possible colors; for TSP, node embeddings scored by dot product.
-All GNN outputs are refined with local search post-processing.
+
+An external ablation audit of the \emph{original} Max-Cut configuration (constant node features, unnormalised loss, BatchNorm, single-threshold decoding) found it effectively broken: the network's raw output was worse than a coin flip and nearly all measured performance came from the attached local search. The Max-Cut model was rebuilt with three fixes, in order of measured impact:
+
+\begin{itemize}
+    \item \textbf{Symmetry-breaking features.} With constant features, the loss has an exact critical point at the uniform output $p \equiv 0.5$ --- its value is exactly $|E|/2$, the random-cut baseline, and a deterministic message-passing net cannot distinguish nodes there. The Max-Cut GIN now receives Laplacian positional encodings (the node's normalised degree plus its coordinates in the top-4 eigenvectors of $L$, sign-canonicalised), which survive neighbourhood aggregation and tie the model to the spectral relaxation. Plain iid random features were also tried and discarded: five rounds of aggregation average their variance away (per-node output std $\approx 2\times10^{-3}$), and plain LayerNorm rescales away the per-node signal entirely (a measured 100$\times$ across-node collapse).
+    \item \textbf{Matched decoding budget.} The original decoder thresholded one deterministic forward pass at $p>0.5$ (with a degenerate-output guard). The rebuilt decoder samples the partition as Bernoulli($p$) coin flips 50 times and keeps the best cut --- the same best-of-many rounding budget the Goemans-Williamson solver receives, in the spirit of the probabilistic decoding of \cite{karalias2020erdos}.
+    \item \textbf{Loss normalisation and per-graph statistics.} The loss is divided by the number of (undirected) edges so it reads directly as the fraction of edges cut and is comparable across configurations; BatchNorm is replaced by per-graph GraphNorm so no statistics fitted on the training distribution are ever applied to a test graph.
+\end{itemize}
+
+The rebuilt model is trained with a 10\% held-out validation slice, checkpoint selection on validation loss, and cosine LR annealing, on three seeds (42, 43, 44); the canonical committed run is seed 42 and the seed spread is reported.
+The TSP and Coloring models keep their original architectures (their committed artifacts are from the original runs).
 
 \subsection{Evaluation Protocol}
 
-Each algorithm is evaluated on: (1) solution quality relative to the best algorithm, (2) wall-clock time, and (3) win rate against the best classical algorithm.
-All experiments run on CPU (Apple M3) for fair timing comparison.
+Each algorithm is evaluated on: (1) solution quality as the mean approximation ratio and mean cut per edge, (2) wall-clock time, and (3) win/tie/loss three-ways against every other method.
+Every method --- including a coin flip --- receives the same optional 1-opt local-search refinement, so the comparison isolates the learned component; the pairwise head-to-heads are additionally reported with paired-bootstrap 95\% CIs and Wilcoxon signed-rank tests.
+For $n \leq 20$ the exact optimum is computed by brute force ($2^n$ enumeration), turning relative comparisons into rigorous ones.
+All experiments run on CPU (Apple M3) for timing comparison; GNN timings exclude training cost (amortisation is discussed in the caveats).
 
 \subsection*{Erratum}
 
-A post-publication audit found that the original evaluation seeds (\texttt{42 + 1000\,i}) placed two of the 600 Max-Cut instances (Erd\H{o}s--R\'enyi, $n{=}100$, seeds 42 and 1042) inside the training seed range 42--2041: two evaluation graphs had been seen during training, and one of the original 11 GNN wins occurred on such an instance. The experiment runner now offsets evaluation seeds beyond the training range (\texttt{42 + 2000 + 1000\,i}), and the Max-Cut comparison in this version of the paper was regenerated end to end under the fixed runner. The reported results (Section~\ref{sec:maxcut}) therefore come from 600 evaluation instances that the GNN never saw during training. The same audit prompted three further reporting fixes in the repository: exact ties with the best classical cut are now reported alongside wins and losses instead of being counted silently as losses; a \texttt{gw\_fallback} column records whenever Goemans-Williamson substituted the spectral relaxation (none fired in the regenerated run); and the failure-prediction scaler is now fitted inside each cross-validation fold (a scikit-learn \texttt{Pipeline}) rather than on the full dataset.
+A post-publication audit found that the original evaluation seeds (\texttt{42 + 1000\,i}) placed two of the 600 Max-Cut instances (Erd\H{o}s--R\'enyi, $n{=}100$, seeds 42 and 1042) inside the training seed range 42--2041: two evaluation graphs had been seen during training. The experiment runner now offsets evaluation seeds beyond the training range (\texttt{42 + 2000 + 1000\,i}), and the comparison was regenerated end to end under the fixed runner. The same audit prompted three reporting fixes in the repository: exact ties are now reported alongside wins and losses; a \texttt{gw\_fallback} column records whenever Goemans-Williamson substituted the spectral relaxation; and the failure-prediction scaler is now fitted inside each cross-validation fold.
+
+A second, ablation-focused audit then found the decisive issue addressed in this revision: the original GNN pipeline's apparent performance was almost entirely its attached local search (a coin flip with the identical refinement scored within 1\% of the pipeline), with the network's raw output worse than a coin flip --- a provable consequence of the constant-feature critical point described above. The Max-Cut model was rebuilt with the three fixes, retrained on three seeds, and every comparison re-run end to end under the committed runners; the committed artifacts are the regenerated outputs.
 
 \section{Results}
 
@@ -112,27 +130,53 @@ A post-publication audit found that the original evaluation seeds (\texttt{42 + 
 
 \begin{table}[h]
 \centering
-\caption{Max-Cut results across 600 instances (5 families $\times$ 4 sizes $\times$ 30 instances). GNN includes local search refinement. Win rate = fraction of instances where the algorithm strictly beats every other algorithm.}
+\caption{Max-Cut results across 600 committed-run instances (5 families $\times$ 4 sizes $\times$ 30). Every learned or constructed partition may be refined by the same 1-opt local search. Win/tie/loss = strict comparison against every other method. GNN row: the rebuilt model, canonical (seed-42) run.}
 \label{tab:maxcut}
 \begin{tabular}{lcccc}
 \toprule
-\textbf{Algorithm} & \textbf{Guarantee} & \textbf{Avg Cut/Best} & \textbf{Win Rate} & \textbf{Avg Time (s)} \\
+\textbf{Algorithm} & \textbf{Guarantee} & \textbf{Avg Cut/Best} & \textbf{Win/Tie/Loss} & \textbf{Avg Time (s)} \\
 \midrule
-Random & $\geq 0.5$ & 0.671 & 0.0\% & $< 0.001$ \\
-Greedy & $\geq 0.5$ & 0.945 & 0.2\% & 0.002 \\
-Spectral & --- & 0.979 & 7.2\% & 0.003 \\
-Goemans-Williamson & $\geq 0.878$ & \textbf{0.999} & \textbf{66.2\%} & 3.48 \\
-\textbf{GNN + local search} & --- & 0.958 & 2.0\% & 0.032 \\
+Random partition & $\geq 0.5$ & 0.671 & 0\%/0\%/100\% & $< 0.001$ \\
+Greedy local search & $\geq 0.5$ & 0.945 & 0\%/4.8\%/95.2\% & 0.002 \\
+Spectral (+ its LS) & --- & 0.979 & 1.8\%/19.5\%/78.7\% & 0.003 \\
+Goemans-Williamson & $\geq 0.878$ & \textbf{0.999} & 0\%/52.2\%/47.8\%$^{a}$ & 3.6 \\
+\textbf{GNN (rebuilt) + shared LS} & --- & 0.986 & 1.8\%/25.8\%/72.3\% & 0.037 \\
 \bottomrule
 \end{tabular}
-\caption*{\footnotesize Avg times are wall-clock means over the committed run on one machine
-(Goemans-Williamson dominated by the $n{=}200$ SDP solves); runtimes are
-environment- and threading-dependent and are reported only to show ordering.}
+\caption*{\footnotesize $^{a}$GW loses only to GW+LS, which refines GW's own output (Table~\ref{tab:ablation}).
+Avg times are wall-clock means over the committed run on one machine, dominated by the $n{=}200$ SDP solves;
+runtimes are environment- and threading-dependent and are reported only to show ordering.}
 \end{table}
 
-The GNN achieves competitive but inferior performance to the best classical algorithms.
-Notably, the Goemans-Williamson algorithm dominates on quality despite its SDP solve being far slower at $n = 200$ (Fig.~\ref{fig:maxcut}).
-The GNN wins on only 2.0\% (12/600) of instances. A further 45 instances (7.5\%) end in exact ties with the best classical cut---9.5\% match-or-beat---and the remaining 543 are losses.
+\begin{table}[h]
+\centering
+\caption{The ablation: mean cut per edge and approximation ratios. ``raw'' = without the shared 1-opt local search. Ratios to the SDP objective are proxies (SCS solution); ratios to the exact optimum (150 instances, $n \leq 20$) are rigorous.}
+\label{tab:ablation}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{mean cut/edges} & \textbf{ratio to SDP obj.} & \textbf{ratio to exact opt. ($n{\leq}20$)} \\
+\midrule
+Coin flip, raw & 0.499 & 0.642 & --- \\
+Coin flip + LS & 0.714 & 0.906 & 0.933 \\
+Greedy (= coin flip + LS) & 0.712 & 0.903 & --- \\
+Spectral, raw & 0.685 & 0.865 & --- \\
+Spectral + LS & 0.740 & 0.936 & 0.975 \\
+Goemans-Williamson (50 roundings) & 0.755 & 0.956 & \textbf{1.000} \\
+GW + LS & \textbf{0.758} & \textbf{0.960} & \textbf{1.000} \\
+\textbf{GNN (original, broken), raw} & \textbf{0.211} & 0.268 & --- \\
+GNN (original, broken) + LS & 0.722 & 0.916$^{b}$ & --- \\
+\textbf{GNN (rebuilt), raw (50 samples)} & \textbf{0.674} & 0.841 & --- \\
+GNN (rebuilt) + LS (canonical) & 0.745 & 0.943 & 0.979 \\
+\bottomrule
+\end{tabular}
+\caption*{\footnotesize $^{b}$The broken model's 0.722 with refinement is statistically indistinguishable from the coin-flip control's 0.714 (mean ratio 0.9895); its raw 0.211 is \emph{worse} than the coin flip's 0.499.}
+\end{table}
+
+\textbf{The negative control.} The original pipeline's GNN+LS (0.722) is within 1\% of a coin flip + the identical local search (0.714; mean ratio 0.9895), which beats it outright on 30.8\% of instances; the network's raw output (0.211) is worse than the coin flip itself. The loss is purely quadratic around the uniform output --- per edge, $p_i{+}p_j{-}2p_ip_j = \tfrac12 - 2q_iq_j$ with $q = p - \tfrac12$ --- so all-$p{=}\tfrac12$ is an exact critical point whose value is $|E|/2$: the random baseline. With constant features the network cannot distinguish nodes there, and the committed original run's epoch-1 loss equals that baseline exactly; 80 epochs of cosine-annealed training converged to $0.627\,|E|$ and stopped. On 49.5\% of instances the raw thresholded output cut less than 5\% of the edges --- the degenerate-output guard in the original code exists precisely because of this collapse.
+
+\textbf{The rebuilt model.} With Laplacian positional-encoding features, the $O(1)$ logit initialisation, the matched 50-sample decoding and the normalised loss, the raw output becomes genuinely informative (0.674 vs.\ the coin flip's 0.499) and the full pipeline reaches 0.745 --- decisively above the coin-flip control (mean ratio 1.0424, 95\% CI [1.0390, 1.0458], Wilcoxon $p = 3.6\times10^{-69}$), above the spectral method (1.0080 [1.0058, 1.0101], $p = 2.6\times10^{-18}$), and still below Goemans-Williamson (0.9867 [0.9850, 0.9883], $p = 3.4\times10^{-35}$). The conclusion for practitioners is unchanged: \emph{Goemans-Williamson dominates}. Notably, GW refined with the same local search attains the exact optimum on every brute-force-verifiable instance ($n \leq 20$, 150 instances, ratio 1.000), while the GNN reaches 0.979 of exact there.
+
+\textbf{Splitting the evaluation.} The GNN trains on Erd\H{o}s--R\'enyi $n{=}100$ only. In-distribution it reaches 0.994 of the best classical cut and wins 36.7\% of the $n{=}100$ slice; out-of-distribution (the other 570 instances) 0.986 and 10.0\% --- generalisation degrades gracefully but measurably. Across the three training seeds the pipeline wins 68/49/60 of 600 (8.2\%--11.3\%) at 0.986--0.987 relative, so the headline is not a seed artefact. Curiously, the GNN-to-best ratio rises with size (0.942 at $n{=}20$ to 0.971 at $n{=}200$); larger cuts give the local search more traction, which is also why every refined method compresses toward GW.
 
 \begin{figure}[h]
 \centering
@@ -145,7 +189,7 @@ The GNN wins on only 2.0\% (12/600) of instances. A further 45 instances (7.5\%)
     \includegraphics[width=\textwidth]{../analysis/figures/maxcut/runtime_comparison.png}
     \caption{Runtime scaling}
 \end{subfigure}
-\caption{Max-Cut comparison. The GNN (with local search) rarely beats the best classical algorithm. Its advantage is speed, not quality.}
+\caption{Max-Cut comparison (rebuilt GNN). The GNN is competitive but does not beat the classical algorithms on quality; its advantage is speed.}
 \label{fig:maxcut}
 \end{figure}
 
@@ -226,16 +270,15 @@ We train logistic regression and random forest classifiers to predict whether th
     \includegraphics[width=\textwidth]{../analysis/figures/failure_prediction/performance_vs_spectral_gap.png}
     \caption{GNN performance vs.\ spectral gap $\lambda_2$}
 \end{subfigure}
-\caption{Failure prediction. With only 2.0\% positive examples (GNN wins), the majority-class baseline achieves 98\% accuracy by always predicting ``classical wins.'' The logistic-regression classifier with balanced class weights achieves balanced accuracy 0.61 and F1 0.23, but the cross-validated spread is wide ($\pm 0.25$) given the tiny positive class, so the estimate is consistent with near-chance behaviour. Spectral features are the strongest predictors but the signal is too weak to learn a reliable classifier.}
+\caption{Failure prediction. With 11.3\% positive examples (GNN wins), the majority-class baseline achieves 88.7\% accuracy by always predicting ``classical wins.'' The logistic-regression classifier with balanced class weights achieves balanced accuracy 0.54 and F1 0.21; the random forest 0.47 and 0.16 --- both indistinguishable from chance. The signal is too weak to learn a reliable classifier.}
 \label{fig:failure}
 \end{figure}
 
 \textbf{Key findings:}
 \begin{itemize}
-    \item The minimum eigenvalue of the adjacency matrix ($\lambda_{\min}(A)$) is the single strongest predictor of classical dominance (logistic regression), with the Laplacian spectral radius, maximum Laplacian eigenvalue, and spectral gap leading the random-forest importances (see Fig.~\ref{fig:failure}).
-    \item Graphs with low spectral gap (e.g., Watts-Strogatz small-world) are hardest for GNNs.
-    \item Barab\'asi-Albert graphs, with their heavy-tailed degree distribution, are most amenable to GNNs.
-    \item \textbf{However}, with only 2.0\% positive examples, the failure prediction task is near chance and high-variance: balanced accuracy 0.61 (LR) / 0.56 (RF), F1 0.23 / 0.03. The majority-class baseline (always predict ``classical wins'') achieves 98\% raw accuracy, higher than the learned models' 52\% (LR) / 82\% (RF). With so few GNN wins there is little signal to learn a reliable predictor.
+    \item Degree heterogeneity (logistic-regression coefficient $+1.46$ on standardised degree std) and edge count ($-1.42$) are the strongest signed predictors; the random forest leans on the largest Laplacian eigenvalue ($0.158$), the minimum adjacency eigenvalue ($0.114$), degree std ($0.107$), the clustering coefficient ($0.105$) and the spectral gap ($0.100$).
+    \item Relative to the best classical cut, the GNN is weakest on planted-partition graphs ($0.981$) and strongest on random-regular graphs ($0.992$) --- the opposite ordering to the original (broken) model, whose degree-blind features could not distinguish regular graphs at all.
+    \item \textbf{However}, with 11.3\% positive examples the prediction task is at chance: balanced accuracy 0.54 (LR) / 0.47 (RF), F1 0.21 / 0.16, against a 0.887 majority-class baseline. The learned models are not usable predictors.
 \end{itemize}
 
 \section{Discussion}
@@ -251,30 +294,32 @@ Our results suggest a clear decision rule:
 
 \subsection{Why Do GNNs Struggle?}
 
-Three factors explain the GNN's limitations:
+Four factors explain the GNN's limitations, in rough order of how much they cost on this benchmark:
 \begin{enumerate}
-    \item \textbf{Expressiveness}: Standard message-passing GNNs (including GIN) cannot distinguish all non-isomorphic graphs, limiting their ability to exploit fine-grained structure.
-    \item \textbf{Generalization}: GNNs trained on one graph family and size degrade out-of-distribution. Classical algorithms are instance-agnostic.
-    \item \textbf{Lack of guarantees}: Classical approximation algorithms come with worst-case bounds. GNNs provide no such assurance.
+    \item \textbf{The objective's geometry.} The unsupervised cut loss is quadratic around the uniform output, with an exact critical point at the random-cut baseline. A model whose features cannot distinguish nodes (constant features) starts on that saddle and barely leaves it; the gradient signal is proportional to the distance from it, so escape is exponentially slow. Symmetry-breaking features plus a non-degenerate initialisation are necessary, not cosmetic.
+    \item \textbf{What the refinement contributes.} Local search is not a detail: for the original model it was the entire result, and even for the rebuilt model it supplies most of the quality (raw 0.674 $\to$ refined 0.745). Comparing a refined learned pipeline against unrefined classical baselines measures the refinement, not the learning --- the error this work's ablation exists to correct.
+    \item \textbf{Generalisation and expressiveness.} GIN is 1-WL-limited, and the model is trained on one family/size; performance degrades measurably out-of-distribution (0.994 in-distribution vs.\ 0.986 elsewhere). Classical algorithms are instance-agnostic and carry worst-case guarantees.
+    \item \textbf{Lack of guarantees.} Even the rebuilt GNN is 1.3\% behind GW on average and has no approximation certificate; GW's SDP objective does, and GW refined is exactly optimal on every instance we can verify.
 \end{enumerate}
 
 \subsection{The Role of Local Search}
 
-A critical observation: all GNN solvers in our experiments were refined with local search.
-For Max-Cut, local search refinement is essential to make the GNN competitive.
-For TSP, the result is even more striking: GNN+2-opt produces \emph{identical} tours to NN+2-opt, meaning the GNN's learned initialization provides zero advantage over the trivial nearest-neighbor heuristic once local search is applied.
-This suggests that for TSP, the value of the GNN is entirely subsumed by cheap local search.
+All GNN solvers in our experiments were refined with local search, and the ablation gives the honest accounting.
+For Max-Cut, the original model's refinement was the whole story (coin flip + the same LS = 0.990 of the pipeline); the rebuilt model's raw output is genuinely informative, but the refinement still moves it from 0.674 to 0.745.
+For TSP, GNN+2-opt produces \emph{identical} tours to NN+2-opt: the learned initialisation provides zero advantage over nearest-neighbour once local search is applied.
+Any comparison of learned and classical solvers must therefore give \emph{both} the same post-processing, or state precisely which side gets it.
 
 \section{Conclusion}
 
-We presented a rigorous empirical comparison of GNN-based solvers against classical approximation algorithms on three NP-hard problems.
-Across Max-Cut, TSP, and Graph Coloring, classical algorithms with proven guarantees consistently outperform GNNs in solution quality.
-The GNN's advantage lies in inference speed, not approximation quality.
-We also attempted failure prediction from graph features, but with only 2.0\% positive examples the task is near chance and high-variance (LR balanced accuracy 0.61 $\pm$ 0.25, F1 0.23): the GNN wins too rarely to support a reliable classifier, and the majority-class baseline (98\% raw accuracy) exceeds the learned models in raw accuracy.
+We presented a rigorous empirical comparison of GNN-based solvers against classical approximation algorithms on three NP-hard problems, with an ablation that isolates where performance comes from.
+On Max-Cut, a naively-trained GNN was indistinguishable from a coin flip plus the same local search --- and its raw output was worse than a coin flip --- for a provable reason; after the three architectural fixes the network becomes a credible heuristic that beats the coin-flip control and the spectral method but remains 1.3\% behind Goemans-Williamson, whose SDP objective certifies it and which is exactly optimal on every brute-force-verifiable instance.
+On TSP and Graph Coloring the learned solvers lose clearly (TSP collapses to nearest-neighbour; coloring uses 15.4 vs.\ 5.4 mean colours).
+Across all three, classical algorithms with proven guarantees remain the reliable baseline, and the learned pipeline's advantage is inference speed, not solution quality.
+We also attempted failure prediction from graph features, but with 11.3\% positive examples the task is at chance (LR balanced accuracy 0.54 $\pm$ 0.18, F1 0.21): the GNN wins too rarely to support a reliable classifier, and the majority-class baseline (0.887 raw accuracy) exceeds the learned models in raw accuracy.
 
 These results do not diminish the promise of learned combinatorial solvers---they sharpen its scope.
 GNNs are most valuable when speed is critical, when distributional regularity can be exploited, and when paired with classical refinement.
-For practitioners, the takeaway is clear: benchmark against the best known algorithms, not just baselines, and report balanced metrics (not raw accuracy) on imbalanced tasks.
+For practitioners, the takeaway is clear: benchmark against the best known algorithms, not just baselines; give every method the same post-processing; and ablate the learned component against a trivial control before attributing performance to it.
 
 \bibliographystyle{plain}
 \bibliography{references}

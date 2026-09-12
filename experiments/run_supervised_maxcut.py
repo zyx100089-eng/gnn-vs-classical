@@ -40,7 +40,7 @@ from src.classical.maxcut.random_cut import random_cut
 from src.classical.maxcut.spectral import spectral_maxcut
 from src.classical.maxcut.goemans_williamson import goemans_williamson
 from src.gnn.models.gin import GINMaxCut
-from src.gnn.training.maxcut_trainer import nx_to_pyg
+from src.gnn.training.maxcut_trainer import nx_to_pyg, gnn_solve_maxcut
 from src.graphs.generators import GRAPH_FAMILIES, generate_batch, generate_instance
 from src.graphs.properties import compute_properties
 
@@ -70,8 +70,12 @@ def train_supervised(device: str, seed: int, epochs: int,
     print(f"Generating {train_graphs} training graphs (erdos_renyi, n={train_n})...")
     graphs = generate_batch("erdos_renyi", train_n, count=train_graphs, base_seed=seed)
     labels = [make_labels(G) for G in graphs]
+    # Feature construction (Laplacian positional encodings) is expensive;
+    # build each graph's PyG Data once instead of once per epoch.
+    pyg_graphs = [nx_to_pyg(G, feature_seed=seed + i) for i, G in enumerate(graphs)]
 
-    model = GINMaxCut(input_dim=1, hidden_dim=128, n_layers=5).to(device)
+    model = GINMaxCut(input_dim=5, hidden_dim=128, n_layers=5,
+                      logit_init_std=1.0).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
@@ -84,7 +88,7 @@ def train_supervised(device: str, seed: int, epochs: int,
         n_b = 0
         for start in range(0, len(perm), batch):
             idx = perm[start:start + batch]
-            data = Batch.from_data_list([nx_to_pyg(graphs[i]) for i in idx])
+            data = Batch.from_data_list([pyg_graphs[i] for i in idx])
             data = data.to(device)
             ys = torch.cat([labels[i] for i in idx]).to(device)
 
@@ -112,36 +116,14 @@ def train_supervised(device: str, seed: int, epochs: int,
 from torch_geometric.data import Batch  # noqa: E402
 
 
-def solve_with(model: GINMaxCut, G, device: str) -> tuple[set, float]:
-    """Solve via GNN + local search (same post-processing as the paper)."""
-    import networkx as nx
-    model_cpu = model.cpu()
-    model_cpu.eval()
-    with torch.no_grad():
-        p = model_cpu(nx_to_pyg(G))
-    model.to(device)
-    nodes = sorted(G.nodes())
-    S = {nodes[i] for i in range(len(nodes)) if p[i].item() > 0.5}
-    if len(S) == 0:
-        S.add(nodes[0])
-    elif len(S) == len(nodes):
-        S.remove(nodes[0])
-    # local search refinement
-    improved = True
-    while improved:
-        improved = False
-        for v in nodes:
-            in_S = v in S
-            gain = 0.0
-            for u in G.neighbors(v):
-                w = G[v][u].get("weight", 1.0)
-                gain += w if (u in S) == in_S else -w
-            if gain > 1e-10:
-                S.add(v) if not in_S else S.remove(v)
-                improved = True
-    cut = sum(G[u][v].get("weight", 1.0) for u, v in G.edges()
-              if (u in S) != (v in S))
-    return S, cut
+def solve_with(model: GINMaxCut, G, device: str, seed: int = 0) -> tuple[set, float]:
+    """Solve via the shared GNN pipeline (50-sample decoding + 1-opt LS).
+
+    Delegates to gnn_solve_maxcut so the supervised follow-up gets exactly
+    the same decoding and refinement as the main comparison.
+    """
+    return gnn_solve_maxcut(model, G, device=device, refine=True,
+                            n_roundings=50, seed=seed)
 
 
 def main() -> None:
@@ -199,7 +181,7 @@ def main() -> None:
                     row["gw_cut"], row["gw_time"] = res["cut_value"], res["runtime"]
                 else:
                     row["gw_cut"], row["gw_time"] = np.nan, np.nan
-                res = evaluate_solver(lambda g, **kw: solve_with(model, g, device), G)
+                res = evaluate_solver(lambda g, **kw: solve_with(model, g, device, seed=seed_i), G)
                 row["gnn_cut"], row["gnn_time"] = res["cut_value"], res["runtime"]
                 classical = [row["greedy_cut"], row["spectral_cut"]]
                 if not np.isnan(row["gw_cut"]):
