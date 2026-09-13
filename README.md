@@ -118,15 +118,25 @@ the SDP actually runs, and it excludes training cost.*
   ties / 372 losses. Both numbers are in the CSV.
 - **Trained on one family, one seed per model — but multi-seed tested.**
   The GNN trains on Erdős–Rényi n=100 only; everything else is
-  out-of-distribution. The committed canonical run is seed 42; seeds 43
-  and 44 are re-evaluated on a common benchmark (all three with
-  `--eval_seed 1000`, beyond every training range) and give 51/44/40
-  wins (8.5%/7.3%/6.7%) at 0.985–0.987 relative, so the model is not a
-  lucky seed. (This controlled spread is on a different, non-overlapping
-  benchmark than the canonical headline run.) (`--seed` changes the trained model and `--eval_seed`
-  the benchmark; keeping `--eval_seed` fixed separates the two.) The
-  ID/OOD split is in the stats output: in-distribution the GNN reaches
-  0.994 of the best classical cut and wins 36.7% of the n=100 ER slice.
+  out-of-distribution. The committed canonical run is seed 42 on its own
+  held-out benchmark (68/600 wins, 0.9861 relative to the best classical
+  cut). The controlled seed spread re-scores all three models on a
+  single common benchmark (`--eval_seed 1000`, beyond every training
+  range, so no evaluation instance was seen in training): 51/44/40 wins
+  (8.5%/7.3%/6.7%) at 0.985–0.987 relative. The same seed-42 model
+  therefore scores 68 vs 51 wins on the two benchmarks while its
+  relative quality is unchanged (0.9861 vs 0.9864; two-proportion
+  $p = 0.10$) — the win count is a threshold statistic and the gap is
+  sampling noise, not a favourable benchmark. Use `--seed` to change the
+  trained model and `--eval_seed` (greater than every `--seed`) to fix
+  the benchmark.
+- **In-distribution vs out-of-distribution.** On the canonical run the
+  GNN wins 36.7% of the in-distribution Erdős–Rényi n=100 slice versus
+  the *best classical cut* (and 10.0% out-of-distribution), and reaches
+  0.994 / 0.986 of it. The stats script reports a different, stricter
+  denominator — win/tie/loss against *all twelve* methods including
+  GW+LS — giving 10.0% / 1.6% wins; the two are labelled distinctly in
+  its output.
 - **Laplacian PE is not permutation-invariant under eigenvalue degeneracy.**
   The sign-canonicalisation fixes each eigenvector's global sign but not
   rotations within a repeated eigenspace, so on graphs with degenerate

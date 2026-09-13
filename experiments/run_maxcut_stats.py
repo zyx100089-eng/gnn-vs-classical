@@ -102,12 +102,14 @@ def main():
         print(f'  {c:12s} {r.mean():.4f} [{lo:.4f}, {hi:.4f}]')
 
     print('\n=== in-distribution vs out-of-distribution (canonical GNN) ===')
+    print('  (two different denominators; both are correct)')
     for label, sub in [('ID  (erdos_renyi n=100)', d[(d.family == 'erdos_renyi') & (d.n == 100)]),
                        ('OOD (everything else)', d[~((d.family == 'erdos_renyi') & (d.n == 100))])]:
         w, t, l = three_way(sub, 'gnn_ls')
         print(f'  {label} ({len(sub)}): rel-to-best {(sub.gnn_ls/sub.best_classical_cut).mean():.3f}, '
-              f'ratio-to-bound {(sub.gnn_ls/sub.sdp_bound).mean():.3f}, '
-              f'W/T/L {w:.1%}/{t:.1%}/{l:.1%}')
+              f'ratio-to-bound {(sub.gnn_ls/sub.sdp_bound).mean():.3f}')
+        print(f'      wins vs best classical : {(sub.gnn_ls > sub.best_classical_cut).mean():.1%}')
+        print(f'      W/T/L vs all 12 methods: {w:.1%}/{t:.1%}/{l:.1%}')
 
     print('\n=== multi-seed spread ===')
     for f in sorted(glob.glob('results/analysis/maxcut_comparison_seed*.csv')):

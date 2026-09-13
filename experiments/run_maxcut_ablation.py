@@ -122,7 +122,10 @@ def exact_maxcut_bruteforce(G):
     return float(cuts.max())
 
 
-def main():
+def main(seed: int = 42, eval_seed: int = 42, train_graphs: int = 2000):
+    """`seed`/`eval_seed`/`train_graphs` must match the comparison run whose
+    CSV is being analysed, so the ablation rebuilds exactly the same
+    instances (same formula as run_maxcut_comparison.py)."""
     dev = 'mps' if torch.backends.mps.is_available() else 'cpu'
     model = GINMaxCut(input_dim=5, hidden_dim=128, n_layers=5, logit_init_std=1.0)
     model.load_state_dict(torch.load('results/analysis/maxcut_gnn_weights.pt',
@@ -130,13 +133,18 @@ def main():
     model.eval()
 
     df = pd.read_csv('results/analysis/maxcut_comparison.csv')
+    eval_base = max(seed, eval_seed)
+    print(f'seed={seed} eval_seed={eval_seed} train_graphs={train_graphs} '
+          f'-> eval base {eval_base}')
 
     rows = []
     for k, (_, r) in enumerate(df.iterrows()):
-        seed_i = 42 + 2000 + int(r['instance']) * 1000
+        seed_i = eval_base + train_graphs + int(r['instance']) * 1000
         G = generate_instance(r['family'], int(r['n']), seed=seed_i)
         m = G.number_of_edges()
-        assert m == int(r['m']), (m, r['m'])
+        assert m == int(r['m']), (
+            f'instance mismatch (m={m} vs CSV {r["m"]}): the ablation args '
+            f'do not match the comparison run')
 
         # --- coin-flip controls (no GNN involved), per-instance seeded ---
         # 1-sample and 50-sample versions, so the control is budget-matched
@@ -207,6 +215,9 @@ def main():
                     .rename(columns={'gnn_cut': 'gnn_ls', 'greedy_cut': 'greedy',
                                      'spectral_cut': 'spectral', 'gw_cut': 'gw'}),
                     on=['family', 'n', 'instance'])
+    assert len(out) == len(df), (
+        f'merge kept {len(out)} of {len(df)} rows: the ablation rebuilt '
+        f'different instances than the comparison CSV')
     out.to_csv('results/analysis/maxcut_ablation.csv', index=False)
     print('saved results/analysis/maxcut_ablation.csv')
 
@@ -221,5 +232,12 @@ def main():
 
 
 if __name__ == '__main__':
-
-    main()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=42,
+                    help="training seed of the comparison run (default 42)")
+    ap.add_argument("--eval_seed", type=int, default=42,
+                    help="evaluation seed of the comparison run (default 42)")
+    ap.add_argument("--train_graphs", type=int, default=2000)
+    a = ap.parse_args()
+    main(seed=a.seed, eval_seed=a.eval_seed, train_graphs=a.train_graphs)
