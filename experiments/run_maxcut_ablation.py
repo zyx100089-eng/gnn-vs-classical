@@ -37,7 +37,8 @@ from src.graphs.generators import GRAPH_FAMILIES, generate_instance
 from src.classical.maxcut.spectral import spectral_maxcut
 from src.classical.maxcut.goemans_williamson import _cut_value
 from src.gnn.models.gin import GINMaxCut
-from src.gnn.training.maxcut_trainer import nx_to_pyg, local_search_refine as local_search_1opt
+from src.gnn.training.maxcut_trainer import nx_to_pyg
+from src.classical.maxcut.local_search import local_search_refine as local_search_1opt
 
 LOCAL_SEARCH_NOTE = ("1-opt local search: repeatedly move any node whose "
                      "move strictly increases the cut, until no move helps "

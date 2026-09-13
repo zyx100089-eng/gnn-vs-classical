@@ -12,6 +12,8 @@ import networkx as nx
 import numpy as np
 from scipy.sparse.linalg import eigsh
 
+from .local_search import local_search_refine
+
 
 def _cut_value(G: nx.Graph, S: set) -> float:
     return sum(
@@ -48,23 +50,6 @@ def spectral_maxcut(G: nx.Graph, refine: bool = True) -> tuple[set, float]:
         S.remove(nodes[0])
 
     if refine:
-        improved = True
-        while improved:
-            improved = False
-            for v in nodes:
-                in_S = v in S
-                gain = 0.0
-                for u in G.neighbors(v):
-                    w = G[v][u].get("weight", 1.0)
-                    if (u in S) == in_S:
-                        gain += w
-                    else:
-                        gain -= w
-                if gain > 1e-10:
-                    if in_S:
-                        S.remove(v)
-                    else:
-                        S.add(v)
-                    improved = True
+        S = local_search_refine(G, S)
 
     return S, _cut_value(G, S)

@@ -119,9 +119,11 @@ the SDP actually runs, and it excludes training cost.*
 - **Trained on one family, one seed per model — but multi-seed tested.**
   The GNN trains on Erdős–Rényi n=100 only; everything else is
   out-of-distribution. The committed canonical run is seed 42; seeds 43
-  and 44 are re-evaluated on the same benchmark and give 52 and 57
-  wins (8.7% and 9.5%) at 0.985–0.987 relative, so the headline is not
-  a lucky seed. (`--seed` changes the trained model and `--eval_seed`
+  and 44 are re-evaluated on a common benchmark (all three with
+  `--eval_seed 1000`, beyond every training range) and give 51/44/40
+  wins (8.5%/7.3%/6.7%) at 0.985–0.987 relative, so the model is not a
+  lucky seed. (This controlled spread is on a different, non-overlapping
+  benchmark than the canonical headline run.) (`--seed` changes the trained model and `--eval_seed`
   the benchmark; keeping `--eval_seed` fixed separates the two.) The
   ID/OOD split is in the stats output: in-distribution the GNN reaches
   0.994 of the best classical cut and wins 36.7% of the n=100 ER slice.
@@ -152,12 +154,12 @@ method that wants the 1-opt local search gets the same one
 | Greedy (= coin flip + LS) | 0.712 | 0.0% / 4.8% / 95.2% |
 | **GNN (original, broken), raw output** | **0.211** | — |
 | GNN (original, broken) + LS | 0.722 | — |
-| GNN (fixed), raw 50-sample output | 0.674 | 0.3% / 18.5% / 81.2% |
-| **GNN (fixed) + LS (canonical)** | **0.745** | 1.7% / 25.5% / 72.8% |
+| GNN (fixed), raw 50-sample output | 0.677 | 0.0% / 18.8% / 81.2% |
+| **GNN (fixed) + LS (canonical)** | **0.745** | 2.0% / 25.5% / 72.5% |
 | Spectral, no refinement | 0.685 | 0.0% / 6.0% / 94.0% |
-| Spectral + its LS | 0.740 | 2.0% / 19.0% / 79.0% |
+| Spectral + its LS | 0.740 | 2.0% / 19.2% / 78.8% |
 | Goemans-Williamson (50 roundings) | 0.755 | 0.0% / 51.7% / 48.3%* |
-| GW + 1-opt LS | 0.758 | 38.7% / 55.0% / 6.3% |
+| GW + 1-opt LS | 0.758 | 38.7% / 55.3% / 6.0% |
 | *SDP relaxation objective* | *0.790* | *(upper-bound proxy)* |
 | *Exact optimum (n ≤ 20)* | *0.805* | *(150 instances)* |
 
@@ -177,9 +179,9 @@ Reading it honestly:
 - **The matched control (the important correction).** The GNN's decoder
   is best-of-50 samples, so its control must be too. A single coin flip
   gets 0.499 of edges; **best-of-50 coin flips gets 0.588**; the GNN's
-  raw output gets 0.674. So of the 0.175-of-edges raw gap over a naive
-  coin flip, **51% is the control's sample budget, not learning** — the
-  network's own contribution is the remaining 0.086. With the local
+  raw output gets 0.677. So of the 0.179-of-edges raw gap over a naive
+  coin flip, **50% is the control's sample budget, not learning** — the
+  network's own contribution is the remaining 0.089. With the local
   search on both sides the comparison is 0.745 vs 0.717 (mean ratio
   1.038 [1.035, 1.041], Wilcoxon p = 2×10⁻⁷⁰, GNN ahead on 82.2% of
   instances and tied on 9.0%). The conclusion survives, but only the
@@ -194,9 +196,13 @@ Reading it honestly:
   stopped. The committed diagnostic
   (`experiments/run_gnn_symmetry_diagnostics.py`) reproduces the
   mechanism: at all-p=0.5 the unnormalised loss is exactly −|E|/2 with
-  zero gradient; a constant-feature GIN's raw output cuts only 1.8% of
-  edges; and plain LayerNorm shrinks the across-node signal 69× from
-  layer 1 to layer 5, whereas per-graph GraphNorm preserves it.
+  zero gradient; a constant-feature GIN's output is near-constant across
+  nodes (mean output std ≈ 0.02) and its thresholded partition is
+  degenerate — empty or all-one-side — on about a third of sampled
+  instances; and plain LayerNorm shrinks the across-node signal
+  monotonically across the five layers, whereas per-graph GraphNorm
+  keeps it roughly constant. (Any "cut" the degenerate case reports
+  comes from the pipeline's node-0 guard, not from a partition.)
 - **The fixes that worked:** Laplacian positional-encoding features
   (top-4 eigenvectors of L + normalised degree — smooth, survive
   aggregation, and tie the model to the spectral relaxation), an
@@ -205,7 +211,7 @@ Reading it honestly:
   (the same rounding budget GW gets), an edge-count-normalised loss,
   and per-graph GraphNorm instead of BatchNorm.
 - **After the fixes** the raw output is genuinely informative but
-  budget-confounded: 0.674 vs the 50-sample coin flip's 0.588 (vs 0.499
+  budget-confounded: 0.677 vs the 50-sample coin flip's 0.588 (vs 0.499
   for one sample), so half the apparent raw gain is decoding budget.
   With the shared local search the GNN beats the matched control and
   spectral with CIs excluding 1.0, and still loses to GW by 1.3%
@@ -233,8 +239,12 @@ audit) found the model itself was broken and rebuilt it.
    three-way breakdowns are reported everywhere.
 3. **Evaluation seeds overlapped the training seed range** (seeds 42
    and 1042 were literally seen in training). All runners now offset
-   evaluation seeds beyond the training range, and the artifacts were
-   regenerated under the fixed runners.
+   evaluation seeds by `max(--seed, --eval_seed) + train_graphs`, so
+   they clear the training range of *whichever* seed is used, and the
+   artifacts were regenerated under the fixed runners. (When varying
+   `--seed` for the multi-seed spread, pass a common `--eval_seed`
+   greater than every training seed — the committed spread uses 1000 —
+   so all runs also share one benchmark.)
 4. **A `gw_fallback` column records whether GW was really GW** (the
    SDP-status fallback now emits a warning and is logged; none fired).
 5. **Failure prediction scales inside CV folds** (scaler fitted within
@@ -341,7 +351,7 @@ print("GNN mean cut / best cut:", round(df["gnn_cut"].mean() /
 ab = pd.read_csv("results/analysis/maxcut_ablation.csv")
 import numpy as np
 print("GNN raw (no LS) mean cut/edges:",
-      round((ab["gnn_nols"]/ab["m"]).mean(), 3))            # expect ~0.674
+      round((ab["gnn_nols"]/ab["m"]).mean(), 3))            # expect ~0.677
 print("50-sample coin flip, raw:",
       round((ab["rand50_nols"]/ab["m"]).mean(), 3))         # expect ~0.588
 print("GNN+LS / 50-sample-coin-flip+LS ratio:",
@@ -398,13 +408,17 @@ python3 experiments/run_tsp_comparison.py
 python3 experiments/run_coloring_comparison.py
 
 # 3b. Multi-seed spread (optional): vary the training seed but keep the
-#     evaluation benchmark fixed with --eval_seed, so the spread is model
-#     variance rather than benchmark variance
-python3 experiments/run_maxcut_comparison.py --seed 43 --eval_seed 42 --out maxcut_comparison_seed43.csv
-python3 experiments/run_maxcut_comparison.py --seed 44 --eval_seed 42 --out maxcut_comparison_seed44.csv
-#    (or, to re-score already-trained weights on the fixed benchmark:
+#     evaluation benchmark fixed with a common --eval_seed that is larger
+#     than every --seed, so the spread is model variance (not benchmark
+#     variance) and no eval seed lands in any training range. --out also
+#     tags the weights/log files (…_seed43.pt/.csv), so the canonical
+#     model is not overwritten.
+python3 experiments/run_maxcut_comparison.py --seed 42 --eval_seed 1000 --out maxcut_comparison_seed42.csv
+python3 experiments/run_maxcut_comparison.py --seed 43 --eval_seed 1000 --out maxcut_comparison_seed43.csv
+python3 experiments/run_maxcut_comparison.py --seed 44 --eval_seed 1000 --out maxcut_comparison_seed44.csv
+#    (or re-score already-trained weights on the same benchmark:
 #     python3 experiments/run_maxcut_comparison.py --eval_only \
-#         --eval_seed 42 --weights results/analysis/maxcut_gnn_weights_seed43.pt \
+#         --eval_seed 1000 --weights results/analysis/maxcut_gnn_weights_seed43.pt \
 #         --out maxcut_comparison_seed43.csv)
 
 # 4. Ablation study (controls, SDP bounds, exact optima for n<=20;

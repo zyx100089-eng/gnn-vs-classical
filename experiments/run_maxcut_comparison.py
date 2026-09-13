@@ -54,25 +54,39 @@ def main():
                              "runs are scored on the SAME benchmark")
     parser.add_argument("--eval_only", action="store_true",
                         help="skip training and load --weights instead")
-    parser.add_argument("--weights", type=str,
-                        default="results/analysis/maxcut_gnn_weights.pt")
+    parser.add_argument("--weights", type=str, default=None,
+                        help="weights to load with --eval_only (default: "
+                             "derived from --out)")
     parser.add_argument("--out", type=str, default="maxcut_comparison.csv",
-                        help="output CSV name under results/analysis/")
+                        help="output CSV name under results/analysis/; its "
+                             "suffix also tags the weights/log filenames "
+                             "(e.g. maxcut_comparison_seed43.csv -> "
+                             "maxcut_gnn_weights_seed43.pt)")
     args = parser.parse_args()
 
     sizes = [int(s) for s in args.sizes.split(",")]
     device = get_device()
     print(f"Device: {device}")
 
+    # Derive the run tag from --out so multi-seed runs write distinct
+    # weights/log files instead of clobbering the canonical model.
+    stem = Path(args.out).stem
+    run_tag = stem[len("maxcut_comparison"):] if stem.startswith("maxcut_comparison") else ""
+    weights_path = args.weights or f"results/analysis/maxcut_gnn_weights{run_tag}.pt"
+
+    # Evaluation seeds must lie beyond BOTH the training range of --seed
+    # and the --eval_seed base, so offset from their max.
+    eval_base = max(args.seed, args.eval_seed)
+
     # =========================================================
     # PHASE 1: Train GNN (or load committed weights with --eval_only)
     # =========================================================
     if args.eval_only:
-        print(f"\nLoading weights from {args.weights} (skipping training)")
+        print(f"\nLoading weights from {weights_path} (skipping training)")
         from src.gnn.models.gin import GINMaxCut
         model = GINMaxCut(input_dim=5, hidden_dim=128, n_layers=5,
                           logit_init_std=1.0).to(device)
-        model.load_state_dict(torch.load(args.weights, map_location=device))
+        model.load_state_dict(torch.load(weights_path, map_location=device))
         model.eval()
     else:
         print("\n" + "=" * 60)
@@ -85,6 +99,7 @@ def main():
             device=device,
             seed=args.seed,
             verbose=True,
+            run_tag=run_tag,
         )
         print("GNN training complete.")
 
@@ -107,7 +122,7 @@ def main():
                 # range (training uses base_seed .. base_seed +
                 # train_graphs - 1) so no evaluation instance can be a
                 # graph the GNN saw during training.
-                seed_i = args.eval_seed + args.train_graphs + inst * 1000
+                seed_i = eval_base + args.train_graphs + inst * 1000
                 G = generate_instance(family, n, seed=seed_i)
                 props = compute_properties(G)
 

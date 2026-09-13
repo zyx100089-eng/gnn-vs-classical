@@ -5,8 +5,11 @@ Reproduces the mechanism claims made in the README and paper:
   1. With constant node features the unsupervised cut loss has an exact
      critical point at the uniform output p=0.5, whose value is exactly
      -|E|/2 (the random-cut baseline), with zero gradient.
-  2. A GIN with constant features collapses to near-constant outputs, so
-     thresholding it produces a cut close to (or below) a coin flip.
+  2. A GIN with constant features produces near-constant outputs
+     (only node degree distinguishes nodes), and the thresholded
+     partition is frequently degenerate (empty or all-one-side) — so the
+     pipeline's degenerate-output guard, not a learned partition, is what
+     any "cut" would come from.
   3. With Laplacian positional-encoding features the across-node signal
      survives message passing under GraphNorm but is destroyed by
      LayerNorm (which rescales each node's vector by its own norm).
@@ -67,10 +70,6 @@ class GINVariant(nn.Module):
         return (p, stds) if return_layer_std else p
 
 
-def cut_fraction(G, S):
-    return sum(1 for u, v in G.edges() if (u in S) != (v in S)) / G.number_of_edges()
-
-
 def main():
     G = generate_instance("erdos_renyi", 100, seed=2042)
     m = G.number_of_edges()
@@ -90,20 +89,33 @@ def main():
           f"batch-32 unnormalised loss at p=0.5 = {-32*mean_m/2:.1f} "
           f"(the original broken run's epoch-1 loss was -11763.8)")
 
-    print("\n2) Constant-feature GIN output collapse (BatchNorm, original config)")
+    print("\n2) Constant-feature GIN output degeneracy (GraphNorm, untrained)")
+    # With constant features the only signal distinguishing nodes is their
+    # degree (the GINConv neighbour sum); the output is near-constant and
+    # the thresholded partition is frequently all-one-side. The pipeline's
+    # `if len(S)==0 / ==n` guard then substitutes node 0, so any "cut" it
+    # reports is that node's degree, not a partition.
     torch.manual_seed(42)
-    const = GINVariant(1, norm="batchnorm").eval()
-    data_const = nx_to_pyg(G, posenc="random")
-    data_const.x = torch.ones(100, 1)  # constant features, as the original code
-    with torch.no_grad():
-        p = const(data_const)
-    S = {i for i in range(100) if p[i] > 0.5}
-    if not S:
-        S.add(0)
-    elif len(S) == 100:
-        S.discard(0)
-    print(f"   p std = {p.std():.5f}; raw cut = {cut_fraction(G, S):.3f} of edges "
-          f"(a coin flip cuts ~0.5)")
+    const = GINVariant(1, norm="graphnorm").eval()
+    degener = 0
+    stds = []
+    tot = 0
+    for fam, n in [("erdos_renyi", 20), ("erdos_renyi", 100),
+                   ("barabasi_albert", 100), ("random_regular", 50),
+                   ("watts_strogatz", 100)]:
+        for inst in range(20):
+            G = generate_instance(fam, n, seed=2042 + inst * 1000)
+            d = nx_to_pyg(G, posenc="random")
+            d.x = torch.ones(d.num_nodes, 1)  # constant features
+            with torch.no_grad():
+                p = const(d)
+            S = {i for i in range(d.num_nodes) if p[i] > 0.5}
+            tot += 1
+            stds.append(p.std().item())
+            if len(S) == 0 or len(S) == d.num_nodes:
+                degener += 1
+    print(f"   degenerate (empty or all-one-side) partition on {degener}/{tot} "
+          f"sampled instances; mean across-node output std = {np.mean(stds):.5f}")
 
     print("\n3) Feature schemes: across-node output std (untrained, LapPE)")
     data_pe = nx_to_pyg(G, feature_seed=0, posenc="laplacian")
@@ -114,9 +126,8 @@ def main():
             p, stds = model(data_pe, return_layer_std=True)
         print(f"   {norm:10s}: p std = {p.std():.5f}; "
               f"layer across-node stds = {[round(s,4) for s in stds]}")
-        if norm == "layernorm":
-            print(f"      -> LayerNorm shrinks the across-node signal "
-                  f"{stds[0]/stds[-1]:.0f}x from layer 1 to layer 5")
+    print("      -> GraphNorm keeps the across-node signal roughly constant "
+          "through the layers; LayerNorm shrinks it monotonically.")
 
 
 if __name__ == "__main__":

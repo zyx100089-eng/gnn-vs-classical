@@ -15,6 +15,7 @@ from torch_geometric.loader import DataLoader
 
 from src.gnn.models.gin import GINMaxCut, maxcut_loss
 from src.graphs.generators import generate_batch
+from src.classical.maxcut.local_search import local_search_refine  # noqa: F401
 
 
 def nx_to_pyg(G, feature_seed: int = None, posenc: str = "laplacian",
@@ -95,6 +96,7 @@ def train_maxcut_gnn(
     posenc: str = "laplacian",
     pe_dim: int = 4,
     logit_init_std: float = 1.0,
+    run_tag: str = "",
 ) -> GINMaxCut:
     """Train a GNN Max-Cut solver on a distribution of random graphs.
 
@@ -174,12 +176,15 @@ def train_maxcut_gnn(
     model.load_state_dict(best_state)
 
     # Persist the training log and weights alongside the results, so
-    # the training is reproducible from the repo.
+    # the training is reproducible from the repo. `run_tag` lets
+    # multi-seed runs write distinct files instead of clobbering the
+    # canonical model (e.g. run_tag="_seed43").
     results_dir = Path("results/analysis")
     results_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(log_rows).to_csv(results_dir / "maxcut_training_log.csv",
-                                  index=False)
-    torch.save(model.state_dict(), results_dir / "maxcut_gnn_weights.pt")
+    pd.DataFrame(log_rows).to_csv(
+        results_dir / f"maxcut_training_log{run_tag}.csv", index=False)
+    torch.save(model.state_dict(),
+               results_dir / f"maxcut_gnn_weights{run_tag}.pt")
 
     return model
 
@@ -236,31 +241,3 @@ def gnn_solve_maxcut(model: GINMaxCut, G, device: str = "cpu",
         )
 
     return best_S, best_cut
-
-
-def local_search_refine(G, S: set) -> set:
-    """1-opt local search: move any node that strictly increases the cut.
-
-    Shared by the GNN pipeline and the classical+local-search ablations so
-    post-processing is identical everywhere.
-    """
-    nodes = sorted(G.nodes())
-    improved = True
-    while improved:
-        improved = False
-        for v in nodes:
-            in_S = v in S
-            gain = 0.0
-            for u in G.neighbors(v):
-                w = G[v][u].get("weight", 1.0)
-                if (u in S) == in_S:
-                    gain += w
-                else:
-                    gain -= w
-            if gain > 1e-10:
-                if in_S:
-                    S.remove(v)
-                else:
-                    S.add(v)
-                improved = True
-    return S
