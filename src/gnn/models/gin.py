@@ -14,7 +14,7 @@ cut without needing ground-truth labels (unsupervised).
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GINConv, global_mean_pool, GraphNorm
+from torch_geometric.nn import GINConv, GraphNorm
 from torch_geometric.data import Data
 
 

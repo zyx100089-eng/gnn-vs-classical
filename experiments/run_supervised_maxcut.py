@@ -2,15 +2,21 @@
 Follow-up experiment: supervised GNN Max-Cut with a 5x training budget.
 
 The original paper trained the GNN *unsupervised* (maximising the
-expected cut) for 80 epochs and it lost on 98.2% of instances. Two of
-the paper's stated caveats were: "try a supervised Max-Cut baseline
-instead of unsupervised only" and "give the GNN a serious training
-budget". This experiment answers both at once:
+expected cut) for 80 epochs. Two of the paper's stated caveats were:
+"try a supervised Max-Cut baseline instead of unsupervised only" and
+"give the GNN a serious training budget". This experiment answers both
+at once:
 
 1. Labels come from the spectral relaxation (which achieves ~97.8% of
    the best classical cut) — a strong, cheap teacher.
 2. The GNN trains for 300 epochs (5x the original budget) on n=60
    graphs, with early-stopping-free cosine decay.
+
+Note on the target: the spectral partition S and its complement are the
+same cut, but the BCE target fixes one arbitrary orientation, so a model
+that outputs the (equivalent) flipped partition is penalised. This is
+the standard reason a supervised Max-Cut model can underperform, and it
+is one reason the follow-up loses to the unsupervised model.
 
 Question: does a supervised training signal plus a real training
 budget change the conclusion of the paper? Same evaluation protocol:

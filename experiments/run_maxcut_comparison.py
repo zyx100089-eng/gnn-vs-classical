@@ -48,6 +48,16 @@ def main():
     parser.add_argument("--gnn_epochs", type=int, default=80)
     parser.add_argument("--gw_max_n", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--eval_seed", type=int, default=42,
+                        help="base seed for the evaluation instances; kept "
+                             "independent of --seed so that training-seed "
+                             "runs are scored on the SAME benchmark")
+    parser.add_argument("--eval_only", action="store_true",
+                        help="skip training and load --weights instead")
+    parser.add_argument("--weights", type=str,
+                        default="results/analysis/maxcut_gnn_weights.pt")
+    parser.add_argument("--out", type=str, default="maxcut_comparison.csv",
+                        help="output CSV name under results/analysis/")
     args = parser.parse_args()
 
     sizes = [int(s) for s in args.sizes.split(",")]
@@ -55,21 +65,28 @@ def main():
     print(f"Device: {device}")
 
     # =========================================================
-    # PHASE 1: Train GNN
+    # PHASE 1: Train GNN (or load committed weights with --eval_only)
     # =========================================================
-    print("\n" + "=" * 60)
-    print("PHASE 1: Training GNN Max-Cut solver")
-    print("=" * 60)
-
-    model = train_maxcut_gnn(
-        train_graphs=args.train_graphs,
-        train_n=args.train_n,
-        epochs=args.gnn_epochs,
-        device=device,
-        seed=args.seed,
-        verbose=True,
-    )
-    print("GNN training complete.")
+    if args.eval_only:
+        print(f"\nLoading weights from {args.weights} (skipping training)")
+        from src.gnn.models.gin import GINMaxCut
+        model = GINMaxCut(input_dim=5, hidden_dim=128, n_layers=5,
+                          logit_init_std=1.0).to(device)
+        model.load_state_dict(torch.load(args.weights, map_location=device))
+        model.eval()
+    else:
+        print("\n" + "=" * 60)
+        print("PHASE 1: Training GNN Max-Cut solver")
+        print("=" * 60)
+        model = train_maxcut_gnn(
+            train_graphs=args.train_graphs,
+            train_n=args.train_n,
+            epochs=args.gnn_epochs,
+            device=device,
+            seed=args.seed,
+            verbose=True,
+        )
+        print("GNN training complete.")
 
     # =========================================================
     # PHASE 2: Evaluate on all families and sizes
@@ -90,7 +107,7 @@ def main():
                 # range (training uses base_seed .. base_seed +
                 # train_graphs - 1) so no evaluation instance can be a
                 # graph the GNN saw during training.
-                seed_i = args.seed + args.train_graphs + inst * 1000
+                seed_i = args.eval_seed + args.train_graphs + inst * 1000
                 G = generate_instance(family, n, seed=seed_i)
                 props = compute_properties(G)
 
@@ -177,7 +194,7 @@ def main():
     df = pd.DataFrame(all_results)
     results_dir = Path("results/analysis")
     results_dir.mkdir(parents=True, exist_ok=True)
-    df.to_csv(results_dir / "maxcut_comparison.csv", index=False)
+    df.to_csv(results_dir / args.out, index=False)
 
     fig_dir = Path("analysis/figures/maxcut")
     fig_dir.mkdir(parents=True, exist_ok=True)

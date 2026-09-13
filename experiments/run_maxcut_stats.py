@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-METHODS = ['random_cut', 'rand_nols', 'rand_ls', 'greedy', 'gnn_nols',
-           'gnn_ls', 'spectral_norefine', 'spectral',
+METHODS = ['random_cut', 'rand_nols', 'rand50_nols', 'rand_ls', 'rand50_ls',
+           'greedy', 'gnn_nols', 'gnn_ls', 'spectral_norefine', 'spectral',
            'gw', 'gw_plus_ls']
 
 
@@ -51,7 +51,10 @@ def main():
     df = pd.read_csv('results/analysis/maxcut_comparison.csv')
     ab = pd.read_csv('results/analysis/maxcut_ablation.csv')
     d = df.merge(ab, on=['family', 'n', 'instance', 'm'], suffixes=('', '_ab'))
-    d['gnn_ls'] = d['gnn_cut']          # canonical run = comparison CSV
+    # The comparison CSV is the canonical run; the ablation CSV's gnn_ls
+    # alias must be identical to it (fail loudly rather than overwrite).
+    assert (d['gnn_ls'] == d['gnn_cut']).all(), \
+        "ablation gnn_ls disagrees with the canonical comparison CSV"
     print(f'instances: {len(d)}')
 
     print('\n=== mean cut / num_edges (unweighted) ===')
@@ -68,12 +71,22 @@ def main():
             w, t, l = three_way(d, c)
             print(f'  {c:18s} {w:.1%} / {t:.1%} / {l:.1%}')
 
+    print('\n=== sample-budget confound (raw output) ===')
+    gap1 = (d.gnn_nols / d.m).mean() - (d.rand_nols / d.m).mean()
+    gap50 = (d.gnn_nols / d.m).mean() - (d.rand50_nols / d.m).mean()
+    print(f'  raw GNN minus 1-sample coin flip : {gap1:.4f} of edges')
+    print(f'  raw GNN minus 50-sample coin flip: {gap50:.4f} of edges')
+    print(f'  -> {1 - gap50 / gap1:.0%} of the raw gap is the control\'s sample budget')
+
     print('\n=== pairwise GNN head-to-heads (mean ratio, 95% bootstrap CI, Wilcoxon) ===')
-    for other in ['rand_ls', 'spectral', 'gw', 'gw_plus_ls']:
+    for other in ['rand_ls', 'rand50_ls', 'spectral', 'gw', 'gw_plus_ls']:
         ratio = (d.gnn_ls / d[other]).values
         lo, hi = boot_ci(ratio, seed=1)
+        n_zero = int((d.gnn_ls == d[other]).sum())
+        n_nonzero = len(d) - n_zero
         _, p = stats.wilcoxon(d.gnn_ls, d[other], zero_method='wilcox')
-        print(f'  vs {other:10s}: {ratio.mean():.4f} [{lo:.4f}, {hi:.4f}]  p={p:.3g}')
+        print(f'  vs {other:10s}: {ratio.mean():.4f} [{lo:.4f}, {hi:.4f}]  '
+              f'p={p:.3g}  (Wilcoxon drops {n_zero} exact ties, n={n_nonzero})')
 
     print('\n=== ratio to SDP bound (upper-bound proxy; mean, 95% CI) ===')
     for c in ['gnn_ls', 'spectral', 'gw', 'rand_ls', 'gw_plus_ls']:

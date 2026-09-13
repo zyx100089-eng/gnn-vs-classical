@@ -37,34 +37,11 @@ from src.graphs.generators import GRAPH_FAMILIES, generate_instance
 from src.classical.maxcut.spectral import spectral_maxcut
 from src.classical.maxcut.goemans_williamson import _cut_value
 from src.gnn.models.gin import GINMaxCut
-from src.gnn.training.maxcut_trainer import nx_to_pyg
+from src.gnn.training.maxcut_trainer import nx_to_pyg, local_search_refine as local_search_1opt
 
 LOCAL_SEARCH_NOTE = ("1-opt local search: repeatedly move any node whose "
                      "move strictly increases the cut, until no move helps "
                      "(identical implementation for every method).")
-
-
-def local_search_1opt(G, S):
-    nodes = sorted(G.nodes())
-    improved = True
-    while improved:
-        improved = False
-        for v in nodes:
-            in_S = v in S
-            gain = 0.0
-            for u in G.neighbors(v):
-                w = G[v][u].get("weight", 1.0)
-                if (u in S) == in_S:
-                    gain += w
-                else:
-                    gain -= w
-            if gain > 1e-10:
-                if in_S:
-                    S.remove(v)
-                else:
-                    S.add(v)
-                improved = True
-    return S
 
 
 def spectral_norefine(G):
@@ -152,7 +129,7 @@ def main():
     model.eval()
 
     df = pd.read_csv('results/analysis/maxcut_comparison.csv')
-    rng = np.random.RandomState(12345)  # fixed stream for the coin flips
+
     rows = []
     for k, (_, r) in enumerate(df.iterrows()):
         seed_i = 42 + 2000 + int(r['instance']) * 1000
@@ -160,10 +137,27 @@ def main():
         m = G.number_of_edges()
         assert m == int(r['m']), (m, r['m'])
 
-        # --- coin-flip controls (no GNN involved) ---
-        S_flip = {v for v in G.nodes() if rng.random() < 0.5}
-        rand_nols = _cut_value(G, S_flip)
-        rand_ls = _cut_value(G, local_search_1opt(G, set(S_flip)))
+        # --- coin-flip controls (no GNN involved), per-instance seeded ---
+        # 1-sample and 50-sample versions, so the control is budget-matched
+        # to the GNN's 50-sample decoding (and to GW's 50 roundings).
+        crng = np.random.RandomState(seed_i)
+        nodes = sorted(G.nodes())
+        S1 = {v for v in nodes if crng.random() < 0.5}
+        if not S1:
+            S1.add(nodes[0])
+        rand_nols = _cut_value(G, S1)
+        rand_ls = _cut_value(G, local_search_1opt(G, set(S1)))
+        rand50_nols, best50 = -1.0, None
+        for _ in range(50):
+            S = {v for v in nodes if crng.random() < 0.5}
+            if not S:
+                S.add(nodes[0])
+            elif len(S) == len(nodes):
+                S.discard(nodes[0])
+            c = _cut_value(G, S)
+            if c > rand50_nols:
+                rand50_nols, best50 = c, S
+        rand50_ls = _cut_value(G, local_search_1opt(G, set(best50)))
 
         # --- spectral without its refinement (threshold only) ---
         spec_nr = spectral_norefine(G)[1]
@@ -195,6 +189,7 @@ def main():
             'family': r['family'], 'n': int(r['n']), 'instance': int(r['instance']),
             'm': m,
             'rand_nols': rand_nols, 'rand_ls': rand_ls,
+            'rand50_nols': rand50_nols, 'rand50_ls': rand50_ls,
             'spectral_norefine': spec_nr,
             'gw_plus_ls': gw_ls, 'sdp_bound': sdp_val,
             'exact_opt': exact_maxcut_bruteforce(G),
@@ -216,7 +211,7 @@ def main():
 
     m = out['m']
     print('\n=== mean cut / num_edges (unweighted) ===')
-    for c in ['rand_nols', 'rand_ls', 'gnn_nols', 'gnn_ls', 'spectral_norefine',
+    for c in ['rand_nols', 'rand50_nols', 'rand_ls', 'rand50_ls', 'gnn_nols', 'gnn_ls', 'spectral_norefine',
               'greedy', 'spectral', 'gw', 'gw_plus_ls']:
         print(f'  {c:18s} {(out[c]/m).mean():.4f}')
     print(f'  {"sdp_bound":18s} {(out.sdp_bound/m).mean():.4f}  (upper-bound proxy)')
