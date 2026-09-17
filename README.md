@@ -540,9 +540,15 @@ outside S). On the same 150 held-out n=20 instances:
 | unsupervised (rebuilt) | 0.985 | 100/150 |
 | supervised, **spectral** labels | 0.984 | 98/150 |
 
-So exact labels do beat both the unsupervised model and the
-spectral-label model — but every learned variant remains far behind GW.
-Supervision helps marginally; it does not close the gap.
+So the three learned variants are **statistically indistinguishable**:
+a paired Wilcoxon on the same 150 instances gives p = 0.07–0.42 (mean
+differences of 0.04–0.14 of a single cut edge; the 106 > 100 > 98
+ordering is noise, and each model is a single training seed). The label
+source makes no measurable difference — which closes the teacher-ceiling
+objection more decisively than "exact labels help a bit" would: the
+labels are not the lever. All three sit far below Goemans-Williamson,
+which is optimal on 147/150. (Reproduce with
+`experiments/run_supervised_label_comparison.py`.)
 
 The follow-up evaluates held-out instances across five graph families
 and three sizes (n = 20/50/100, 30 instances each = 450 instances), vs
