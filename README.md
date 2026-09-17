@@ -527,6 +527,18 @@ The outcome is bounded before training starts. It answers the "you
 didn't train it properly" objection; it does not answer "could a
 better-trained GNN beat GW".
 
+**Removing the ceiling does not help (exact labels).** To test that
+directly, I retrained the supervised model with *exact-optimal* labels —
+the true maximum cut from brute force, no heuristic teacher — on
+Erdős–Rényi n=20 graphs (`--labels exact --train_n 20 --sizes 20`). On
+150 held-out n=20 instances it reaches only **0.953 of the true optimum
+and solves 46/150 optimally**, *worse* than the unsupervised rebuilt
+model at the same size (0.979, 85/150) and far behind Goemans-Williamson
+(0.999, 147/150). So the teacher ceiling was not the limiting factor:
+even supervised with the answer, the learned component does not match
+the classical solvers. (Artifact:
+`results/analysis/supervised_maxcut_comparison_exactlabels.csv`.)
+
 The follow-up evaluates held-out instances across five graph families
 and three sizes (n = 20/50/100, 30 instances each = 450 instances), vs
 random, greedy, spectral, and Goemans-Williamson. For the comparator

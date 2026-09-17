@@ -45,6 +45,7 @@ from src.classical.maxcut.greedy import greedy_maxcut
 from src.classical.maxcut.random_cut import random_cut
 from src.classical.maxcut.spectral import spectral_maxcut
 from src.classical.maxcut.goemans_williamson import goemans_williamson
+from src.classical.maxcut.exact import exact_maxcut_partition
 from src.gnn.models.gin import GINMaxCut
 from src.gnn.training.maxcut_trainer import nx_to_pyg, gnn_solve_maxcut
 from src.graphs.generators import GRAPH_FAMILIES, generate_batch, generate_instance
@@ -67,15 +68,28 @@ def make_labels(G) -> torch.Tensor:
     return y
 
 
+def make_exact_labels(G) -> torch.Tensor:
+    """Supervised targets: node membership of the exact optimum (n <= 20).
+
+    No teacher ceiling: the labels are the true optimal cut, so this tests
+    whether a supervised GNN can learn to solve small Max-Cut exactly,
+    not whether it can imitate a heuristic.
+    """
+    S, _ = exact_maxcut_partition(G)
+    nodes = sorted(G.nodes())
+    return torch.tensor([1.0 if v in S else 0.0 for v in nodes])
+
+
 def train_supervised(device: str, seed: int, epochs: int,
-                     train_graphs: int, train_n: int) -> GINMaxCut:
-    """Train the GNN with BCE against spectral-relaxation labels."""
+                     train_graphs: int, train_n: int,
+                     label_fn=make_labels, run_tag: str = "") -> GINMaxCut:
+    """Train the GNN with BCE against `label_fn` targets."""
     torch.manual_seed(seed)
     np.random.seed(seed)
 
     print(f"Generating {train_graphs} training graphs (erdos_renyi, n={train_n})...")
     graphs = generate_batch("erdos_renyi", train_n, count=train_graphs, base_seed=seed)
-    labels = [make_labels(G) for G in graphs]
+    labels = [label_fn(G) for G in graphs]
     # Feature construction (Laplacian positional encodings) is expensive;
     # build each graph's PyG Data once instead of once per epoch.
     pyg_graphs = [nx_to_pyg(G, feature_seed=seed + i) for i, G in enumerate(graphs)]
@@ -113,9 +127,10 @@ def train_supervised(device: str, seed: int, epochs: int,
 
     results_dir = Path("results/analysis")
     results_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(log_rows).to_csv(results_dir / "supervised_maxcut_training_log.csv",
-                                  index=False)
-    torch.save(model.state_dict(), results_dir / "supervised_maxcut_gnn_weights.pt")
+    pd.DataFrame(log_rows).to_csv(
+        results_dir / f"supervised_maxcut_training_log{run_tag}.csv", index=False)
+    torch.save(model.state_dict(),
+               results_dir / f"supervised_maxcut_gnn_weights{run_tag}.pt")
     return model
 
 
@@ -141,17 +156,25 @@ def main() -> None:
     ap.add_argument("--instances", type=int, default=30)
     ap.add_argument("--gw_max_n", type=int, default=200)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--tag", type=str, default="",
+                    help="suffix for the output files (keeps runs from clobbering)")
+    ap.add_argument("--labels", choices=["spectral", "exact"], default="spectral",
+                    help="supervision target; 'exact' needs --train_n <= 20")
     args = ap.parse_args()
+    label_fn = make_exact_labels if args.labels == "exact" else make_labels
+    if args.labels == "exact" and args.train_n > 20:
+        raise SystemExit("--labels exact requires --train_n <= 20")
 
     device = get_device()
     print(f"Device: {device}")
 
     # PHASE 1: supervised training
     print("=" * 60)
-    print("PHASE 1: Supervised training (spectral labels, 5x budget)")
+    print(f"PHASE 1: Supervised training ({args.labels} labels, 5x budget)")
     print("=" * 60)
     model = train_supervised(device, args.seed, args.epochs,
-                             args.train_graphs, args.train_n)
+                             args.train_graphs, args.train_n, label_fn=label_fn,
+                             run_tag=args.tag)
     print("training complete.")
 
     # PHASE 2: evaluation on the same protocol as the paper
@@ -198,7 +221,7 @@ def main() -> None:
                 rows.append(row)
 
     df = pd.DataFrame(rows)
-    out = Path("results/analysis/supervised_maxcut_comparison.csv")
+    out = Path(f"results/analysis/supervised_maxcut_comparison{args.tag}.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, index=False)
 
