@@ -176,8 +176,36 @@ method that wants the 1-opt local search gets the same one
 \* GW's row loses only to GW+LS, which refines GW's own output — GW
 can never "win" against a strictly-improved version of itself.
 
+On the 150 instances small enough to solve exactly (`n ≤ 20`, brute
+force), the comparison can be made absolute rather than relative:
+
+| Method ($n \le 20$) | ratio to true optimum | finds the optimum |
+|---|---|---|
+| Goemans-Williamson | 1.0000 | **150/150** |
+| GW + 1-opt LS | 1.0000 | 150/150 |
+| GNN (fixed) + LS | 0.9788 | 85/150 |
+| GNN (fixed), raw (no LS) | 0.9559 | 74/150 |
+| Spectral + LS | 0.9750 | 71/150 |
+| Greedy (random + LS) | 0.9341 | 29/150 |
+| Random | 0.6233 | 0/150 |
+
+So the GNN is not losing to a good heuristic; it is losing to a provably
+perfect answer — Goemans-Williamson finds the true optimum on every
+instance we can verify.
+
 Reading it honestly:
 
+- **Greedy is the control for the GNN.** `greedy_maxcut` is a random
+  starting partition followed by the *same* 1-opt local search that
+  refines the GNN's output. Greedy versus the GNN therefore isolates
+  what the trained network contributes over a coin flip: 0.712 vs 0.745
+  with the refinement (0.677 without it). The contribution is real but
+  modest.
+- **Goemans-Williamson is the only solver that gets no refinement** in
+  the main comparison — the GNN and spectral both receive the local
+  search. The ablation quantifies the handicap (GW 0.755 → 0.758 with
+  LS). GW wins *despite* it, so the comparison is tilted toward the
+  learned model, not away from it.
 - **In the original setup, the network was worse than nothing.** Its raw
   thresholded output cut 21% of edges — a coin flip cuts ~50%. The
   entire reported performance came from the local search. A coin flip
@@ -489,6 +517,15 @@ follow-up answers the two caveats above directly:
    instead of the original unsupervised cut-maximisation loss.
 2. **5× the training budget**: 300 epochs (vs 80), plus cosine LR
    decay — the paper itself called the 80-epoch budget "modest".
+
+**The ceiling this implies.** The teacher reaches only ~97.8% of the
+best classical cut and itself loses to Goemans-Williamson on 73.5% of
+instances (ties on 19.0%). A model trained to reproduce the teacher
+cannot meaningfully exceed it, so this experiment tests whether a GNN
+can *imitate* the spectral relaxation — not whether it can beat GW.
+The outcome is bounded before training starts. It answers the "you
+didn't train it properly" objection; it does not answer "could a
+better-trained GNN beat GW".
 
 The follow-up evaluates held-out instances across five graph families
 and three sizes (n = 20/50/100, 30 instances each = 450 instances), vs

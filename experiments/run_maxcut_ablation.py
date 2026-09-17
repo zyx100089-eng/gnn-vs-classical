@@ -39,6 +39,7 @@ from src.classical.maxcut.goemans_williamson import _cut_value
 from src.gnn.models.gin import GINMaxCut
 from src.gnn.training.maxcut_trainer import nx_to_pyg
 from src.classical.maxcut.local_search import local_search_refine as local_search_1opt
+from src.classical.maxcut.exact import exact_maxcut as exact_maxcut_bruteforce
 
 LOCAL_SEARCH_NOTE = ("1-opt local search: repeatedly move any node whose "
                      "move strictly increases the cut, until no move helps "
@@ -102,24 +103,6 @@ def gw_with_sdp_value(G, n_roundings=50, seed=0):
         if cut > best_cut:
             best_cut, best_S = cut, S
     return sdp_val, best_S, best_cut
-
-
-def exact_maxcut_bruteforce(G):
-    """Exact maximum cut by full enumeration (n <= 20 only). Vectorized."""
-    n = G.number_of_nodes()
-    if n > 20:
-        return np.nan
-    nodes = sorted(G.nodes())
-    idx = {v: i for i, v in enumerate(nodes)}
-    edges = [(idx[u], idx[v], d.get("weight", 1.0)) for u, v, d in G.edges(data=True)]
-    w = np.array([e[2] for e in edges], dtype=float)
-    us = np.array([e[0] for e in edges])
-    vs = np.array([e[1] for e in edges])
-    masks = np.arange(1 << n, dtype=np.uint32)
-    bu = ((masks[:, None] >> us[None, :]) & 1).astype(bool)
-    bv = ((masks[:, None] >> vs[None, :]) & 1).astype(bool)
-    cuts = (bu != bv) @ w
-    return float(cuts.max())
 
 
 def main(seed: int = 42, eval_seed: int = 42, train_graphs: int = 2000):
@@ -229,6 +212,12 @@ def main(seed: int = 42, eval_seed: int = 42, train_graphs: int = 2000):
     print(f'  {"sdp_bound":18s} {(out.sdp_bound/m).mean():.4f}  (upper-bound proxy)')
     nn = out[out.exact_opt.notna()]
     print(f'  {"exact_opt (n<=20)":18s} {(nn.exact_opt/nn.m).mean():.4f}  ({len(nn)} instances)')
+
+    print(f'\n=== ratio to EXACT optimum and # optimal (n<=20, {len(nn)} instances) ===')
+    for c in ['gw', 'gw_plus_ls', 'gnn_ls', 'gnn_nols', 'spectral', 'greedy']:
+        sub = nn.dropna(subset=[c])
+        print(f'  {c:12s} {(sub[c]/sub.exact_opt).mean():.4f}  '
+              f'{int((sub[c] == sub.exact_opt).sum())}/{len(sub)} optimal')
 
 
 if __name__ == '__main__':
