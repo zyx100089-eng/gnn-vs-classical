@@ -415,7 +415,7 @@ EOF
 | TSP GNN collapses to nearest-neighbour | `results/analysis/tsp_gnn_weights.pt` + `tsp_comparison.csv` (embedding-cosine analysis in the paper) |
 | DSatur beats GNN on coloring | `results/analysis/coloring_comparison.csv` |
 | Failure prediction at chance (balanced acc 0.54) | `analysis/figures/failure_prediction/prediction_results.json` |
-| Follow-up: supervised + 5× budget still loses (0.9%) | `results/analysis/supervised_maxcut_comparison.csv` |
+| Follow-up: supervised + 5× budget still loses (2.7%) | `results/analysis/supervised_maxcut_comparison.csv` |
 
 To regenerate any artifact, run the corresponding step in
 [Reproducing the paper](#reproducing-the-paper) — every experiment
@@ -523,21 +523,26 @@ best classical cut and itself loses to Goemans-Williamson on 73.5% of
 instances (ties on 19.0%). A model trained to reproduce the teacher
 cannot meaningfully exceed it, so this experiment tests whether a GNN
 can *imitate* the spectral relaxation — not whether it can beat GW.
-The outcome is bounded before training starts. It answers the "you
-didn't train it properly" objection; it does not answer "could a
-better-trained GNN beat GW".
 
-**Removing the ceiling does not help (exact labels).** To test that
-directly, I retrained the supervised model with *exact-optimal* labels —
-the true maximum cut from brute force, no heuristic teacher — on
-Erdős–Rényi n=20 graphs (`--labels exact --train_n 20 --sizes 20`). On
-150 held-out n=20 instances it reaches only **0.953 of the true optimum
-and solves 46/150 optimally**, *worse* than the unsupervised rebuilt
-model at the same size (0.979, 85/150) and far behind Goemans-Williamson
-(0.999, 147/150). So the teacher ceiling was not the limiting factor:
-even supervised with the answer, the learned component does not match
-the classical solvers. (Artifact:
-`results/analysis/supervised_maxcut_comparison_exactlabels.csv`.)
+**Removing the ceiling helps a little, but not enough (exact labels).**
+To test the ceiling directly I retrained the supervised model with
+*exact-optimal* labels — the true maximum cut from brute force, no
+heuristic teacher — on Erdős–Rényi n=20 graphs (`--labels exact
+--train_n 20 --sizes 20`), with a **flip-invariant loss** (a cut and its
+complement are the same cut, so the loss takes the better of the two
+orientations per graph) and a canonicalised solver (node 0 always
+outside S). On the same 150 held-out n=20 instances:
+
+| model (n = 20) | ratio to true optimum | solved optimally |
+|---|---|---|
+| Goemans-Williamson | 0.999 | **147/150** |
+| supervised, **exact** labels | 0.988 | 106/150 |
+| unsupervised (rebuilt) | 0.985 | 100/150 |
+| supervised, **spectral** labels | 0.984 | 98/150 |
+
+So exact labels do beat both the unsupervised model and the
+spectral-label model — but every learned variant remains far behind GW.
+Supervision helps marginally; it does not close the gap.
 
 The follow-up evaluates held-out instances across five graph families
 and three sizes (n = 20/50/100, 30 instances each = 450 instances), vs
@@ -550,22 +555,16 @@ three sizes so the two rows cover the same protocol.
 | Setting | Win rate | GNN / best classical |
 |---|---|---|
 | Unsupervised (rebuilt, n ≤ 100) | 32/450 = 7.1% | 0.984 |
-| **Supervised, 300 epochs (follow-up)** | **4/450 = 0.9%** | **0.963** |
+| **Supervised, 300 epochs (follow-up)** | **12/450 = 2.7%** | **0.981** |
 
-**The conclusion holds — and then some.** A supervised training signal
-and a 5× budget do not close the gap: on the same 450-instance protocol
-the supervised model is *worse* (0.963 vs 0.984 relative; 0.9% vs 7.1%
-wins). Fitting the spectral-relaxation labels directly makes the
-network imitate that teacher rather than maximise the cut, and the
-imitation is no better than the teacher's own thresholded partition —
-so the learned component still adds nothing over the classical method
-it was trained to copy. Part of the shortfall is a target artefact: a
-partition and its complement are the same cut, but the BCE target fixes
-one arbitrary orientation, so a model that outputs the equivalent
-flipped partition is penalised. This is the standard reason a supervised
-Max-Cut model can underperform, and it is a second reason not to read
-the 0.963 as a clean statement about supervision in general. The result
-is still consistent with the paper's failure-prediction finding: the
+**The conclusion holds.** With the orientation confound removed
+(flip-invariant BCE — previously the target fixed an arbitrary
+orientation, penalising a model that output the equivalent flipped
+partition), supervised training plus a 5× budget improves the follow-up
+model from 0.963 to 0.981 relative. It still does not beat the
+unsupervised rebuilt model on the same 450 instances (0.981 vs 0.984;
+2.7% vs 7.1% wins), so the supervised signal does not close the gap.
+This is consistent with the paper's failure-prediction finding: the
 GNN's rare wins are not a recoverable signal.
 
 Reproduce with:

@@ -114,7 +114,17 @@ def train_supervised(device: str, seed: int, epochs: int,
 
             optimizer.zero_grad()
             p = model(data)
-            loss = F.binary_cross_entropy(p, ys)
+            # A cut and its complement are the same cut, so the target's
+            # global orientation is arbitrary. Take the better of the two
+            # orientations per graph, otherwise BCE penalises a perfect
+            # partition for being flipped.
+            bce_y = F.binary_cross_entropy(p, ys, reduction="none")
+            bce_ny = F.binary_cross_entropy(p, 1.0 - ys, reduction="none")
+
+            g = data.batch
+            mean_y = scatter(bce_y, g, dim=0, reduce="mean")
+            mean_ny = scatter(bce_ny, g, dim=0, reduce="mean")
+            loss = torch.minimum(mean_y, mean_ny).mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -135,6 +145,7 @@ def train_supervised(device: str, seed: int, epochs: int,
 
 
 from torch_geometric.data import Batch  # noqa: E402
+from torch_geometric.utils import scatter  # noqa: E402
 
 
 def solve_with(model: GINMaxCut, G, device: str, seed: int = 0) -> tuple[set, float]:

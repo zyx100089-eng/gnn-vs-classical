@@ -32,6 +32,12 @@ def exact_maxcut_partition(G):
     cuts = (bu != bv) @ w
     best = int(cuts.argmax())
     S = {nodes[i] for i in range(n) if (best >> i) & 1}
+    # Canonicalise the global sign: a cut and its complement are the same
+    # cut, so always return the orientation with the smallest node outside
+    # S. Without this the returned partition flips arbitrarily with the
+    # integer-mask ordering (node 0 was inside S ~54% of the time).
+    if nodes[0] in S:
+        S = set(nodes) - S
     return S, float(cuts[best])
 
 
