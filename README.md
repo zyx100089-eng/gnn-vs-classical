@@ -26,8 +26,9 @@ became a credible heuristic: against a **budget-matched** control
 1.038 (95% bootstrap CI [1.035, 1.041]), and it edges out the spectral
 method (1.008, [1.006, 1.010]) — but it still loses to
 **Goemans-Williamson** (0.987, [0.985, 0.988]), which, with or without
-the local search, reaches the *exact* optimum on every instance we can
-verify (n ≤ 20). About half of the network's apparent raw advantage
+the local search, reaches the *exact* optimum on 299 of the 300
+instances verified so far (n ≤ 20) — it misses one 20-node
+Watts–Strogatz graph by a single edge. About half of the network's apparent raw advantage
 over a naive coin flip is just its 50-sample decoding budget, not
 learning. On TSP the GNN still collapses to
 nearest-neighbour. Predicting *when* the GNN wins is genuinely at
@@ -104,8 +105,8 @@ the SDP actually runs, and it excludes training cost.*
   exact optimum upper-bounds every max cut; the committed value is the
   objective at the solver's (approximate, SCS) solution, so ratios to it
   are indicative only. The rigorous certificates are the brute-forced
-  exact optima for n ≤ 20 (150 instances), where GW achieves ratio 1.000
-  on every instance.
+  exact optima for n ≤ 20 (150 canonical instances), where GW achieves
+  ratio 1.000 on all of them.
 - **best_classical_cut is an oracle over baselines.** The headline
   "win vs the best classical algorithm" compares the GNN against
   max(greedy, spectral, GW) — an upward-biased oracle. The pairwise
@@ -190,8 +191,10 @@ force), the comparison can be made absolute rather than relative:
 | Random | 0.6233 | 0/150 |
 
 So the GNN is not losing to a good heuristic; it is losing to a provably
-perfect answer — Goemans-Williamson finds the true optimum on every
-instance we can verify.
+perfect answer — Goemans-Williamson finds the true optimum on 150/150 of
+these instances, and 299/300 across every instance verified so far (it
+misses one 20-node Watts–Strogatz graph by a single edge, on the
+separate n=20 benchmark used for the label experiment below).
 
 Reading it honestly:
 
@@ -311,6 +314,16 @@ audit) found the model itself was broken and rebuilt it.
    mean approximation ratios with paired-bootstrap CIs and Wilcoxon
    signed-rank tests, split in-distribution vs out-of-distribution
    (`run_maxcut_stats.py`).
+10. **The "GW is optimal on every verifiable instance" claim was too
+    strong.** GW is 150/150 on the canonical n≤20 set, but 149/150 on
+    the separate n=20 benchmark used for the label experiment (it misses
+    one 20-node Watts–Strogatz graph by one edge). The claim now reads
+    299/300 across everything verified.
+11. **The supervised follow-up's comparator was on a different draw.**
+    The follow-up evaluates at seed base 1242; the canonical run uses
+    2042. The comparator is now re-scored on the same 450 instances, and
+    the follow-up's budget is stated (300 epochs vs the unsupervised
+    model's 80).
 
 ## Algorithms implemented
 
@@ -465,6 +478,22 @@ python3 experiments/run_maxcut_comparison.py --seed 44 --eval_seed 1000 --out ma
 python3 experiments/run_maxcut_ablation.py   # ~15 min
 python3 experiments/run_maxcut_stats.py
 
+# 4b. Supervised label-source comparison at n=20 (three variants x two
+#     seeds, all on the common benchmark 2200 = eval_seed 1000 +
+#     train_graphs 1200). ~30 min total.
+for S in 42 43; do
+  python3 experiments/run_maxcut_comparison.py --seed $S --eval_seed 1000 \
+      --train_graphs 1200 --train_n 20 --sizes 20 \
+      --out maxcut_comparison_unsup_n20$( [ $S = 43 ] && echo _s43 ).csv
+  python3 experiments/run_supervised_maxcut.py --labels spectral --seed $S \
+      --eval_seed 1000 --train_graphs 1200 --train_n 20 --sizes 20 \
+      --tag _spectral_n20$( [ $S = 43 ] && echo _s43 )
+  python3 experiments/run_supervised_maxcut.py --labels exact --seed $S \
+      --eval_seed 1000 --train_graphs 1200 --train_n 20 --sizes 20 \
+      --tag _exactlabels$( [ $S = 43 ] && echo _s43 )
+done
+python3 experiments/run_supervised_label_comparison.py
+
 # 5. Failure-prediction analysis (reads the Max-Cut results CSV)
 python3 experiments/run_failure_analysis.py
 
@@ -532,14 +561,15 @@ heuristic teacher — on Erdős–Rényi n=20 graphs (`--labels exact
 complement are the same cut, so the loss takes the better of the two
 orientations per graph) and a canonicalised solver (node 0 always
 outside S). All variants share one n=20 benchmark and use **two training
-seeds** each:
+seeds** each (the unsupervised model trains for 80 epochs; the two
+supervised variants for 300, i.e. 3.75× the budget):
 
 | variant (n = 20, 2 seeds) | ratio to true optimum | solved optimally |
 |---|---|---|
 | Goemans-Williamson | 0.9998 | **149/150** |
-| unsupervised | 0.9888 | 108–110/150 |
-| supervised, **exact** labels | 0.9861 | 96–103/150 |
-| supervised, **spectral** labels | 0.9856 | 97–101/150 |
+| unsupervised (80 epochs) | 0.9888 | 108–110/150 |
+| supervised, **exact** labels (300 epochs) | 0.9861 | 96–103/150 |
+| supervised, **spectral** labels (300 epochs) | 0.9856 | 97–101/150 |
 
 The two supervised label sources are indistinguishable (paired Wilcoxon
 on seed-averaged cuts, p = 0.79), so replacing a heuristic teacher with
@@ -552,31 +582,37 @@ below Goemans-Williamson, which is optimal on 149/150. (Reproduce with
 
 The follow-up evaluates held-out instances across five graph families
 and three sizes (n = 20/50/100, 30 instances each = 450 instances), vs
-random, greedy, spectral, and Goemans-Williamson. For the comparator
-row below, the paper's Max-Cut results are restricted to the same
-three sizes so the two rows cover the same protocol.
+random, greedy, spectral, and Goemans-Williamson. The unsupervised
+comparator is re-scored on the *same* 450 instances (both use seed base
+1242), so the two rows are directly comparable.
 
 ![Supervised vs unsupervised GNN relative performance](analysis/figures/followup/supervised_vs_unsupervised.png)
 
 | Setting | Win rate | GNN / best classical |
 |---|---|---|
-| Unsupervised (rebuilt, n ≤ 100) | 32/450 = 7.1% | 0.984 |
+| Unsupervised (rebuilt) | 17/450 = 3.8% | 0.986 |
 | **Supervised, 300 epochs (follow-up)** | **12/450 = 2.7%** | **0.981** |
 
 **The conclusion holds.** With the orientation confound removed
 (flip-invariant BCE — previously the target fixed an arbitrary
 orientation, penalising a model that output the equivalent flipped
-partition), supervised training plus a 5× budget improves the follow-up
-model from 0.963 to 0.981 relative. It still does not beat the
-unsupervised rebuilt model on the same 450 instances (0.981 vs 0.984;
-2.7% vs 7.1% wins), so the supervised signal does not close the gap.
-This is consistent with the paper's failure-prediction finding: the
-GNN's rare wins are not a recoverable signal.
+partition), supervised training plus a **3.75× budget** (300 epochs vs
+the unsupervised model's 80) still does not beat the unsupervised
+rebuilt model on the same 450 instances (0.981 vs 0.986 relative;
+2.7% vs 3.8% wins; paired Wilcoxon p < 0.001). The supervised signal
+does not close the gap despite the larger budget. This is consistent
+with the paper's failure-prediction finding: the GNN's rare wins are
+not a recoverable signal.
 
 Reproduce with:
 
 ```bash
 python3 experiments/run_supervised_maxcut.py          # train + evaluate (~30 min)
+# the unsupervised comparator on the SAME 450 instances (seed base 1242):
+python3 experiments/run_maxcut_comparison.py --eval_only --seed 42 --eval_seed 42 \
+    --train_graphs 1200 --sizes 20,50,100 \
+    --weights results/analysis/maxcut_gnn_weights.pt \
+    --out maxcut_comparison_unsup_followup.csv
 python3 experiments/make_followup_figure.py           # figure above
 ```
 

@@ -1,6 +1,7 @@
 """Generate the follow-up figure: supervised vs unsupervised GNN + classical.
 
-Reads results/analysis/maxcut_comparison.csv (paper, unsupervised) and
+Reads results/analysis/maxcut_comparison_unsup_followup.csv (unsupervised,
+re-scored on the same 450 instances) and
 results/analysis/supervised_maxcut_comparison.csv (follow-up, supervised),
 and plots relative-to-best-classical performance per family.
 """
@@ -19,14 +20,8 @@ results_dir = Path("results/analysis")
 fig_dir = Path("analysis/figures/followup")
 fig_dir.mkdir(parents=True, exist_ok=True)
 
-paper = pd.read_csv(results_dir / "maxcut_comparison.csv")
+paper = pd.read_csv(results_dir / "maxcut_comparison_unsup_followup.csv")
 followup = pd.read_csv(results_dir / "supervised_maxcut_comparison.csv")
-
-# The follow-up ran on sizes {20, 50, 100}; restrict the paper's
-# (600-instance, 4-size) comparison to the same three sizes so the two
-# bars are on the same protocol.
-follow_sizes = sorted(followup["n"].unique())
-paper = paper[paper["n"].isin(follow_sizes)]
 
 paper["gnn_relative"] = paper["gnn_cut"] / paper["best_classical_cut"].clip(lower=1)
 followup["gnn_relative"] = followup["gnn_cut"] / followup["best_classical_cut"].clip(lower=1)
