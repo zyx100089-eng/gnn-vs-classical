@@ -524,30 +524,30 @@ instances (ties on 19.0%). A model trained to reproduce the teacher
 cannot meaningfully exceed it, so this experiment tests whether a GNN
 can *imitate* the spectral relaxation — not whether it can beat GW.
 
-**Removing the ceiling helps a little, but not enough (exact labels).**
+**The label source is not the lever (exact labels, two seeds).**
 To test the ceiling directly I retrained the supervised model with
 *exact-optimal* labels — the true maximum cut from brute force, no
 heuristic teacher — on Erdős–Rényi n=20 graphs (`--labels exact
 --train_n 20 --sizes 20`), with a **flip-invariant loss** (a cut and its
 complement are the same cut, so the loss takes the better of the two
 orientations per graph) and a canonicalised solver (node 0 always
-outside S). On the same 150 held-out n=20 instances:
+outside S). All variants share one n=20 benchmark and use **two training
+seeds** each:
 
-| model (n = 20) | ratio to true optimum | solved optimally |
+| variant (n = 20, 2 seeds) | ratio to true optimum | solved optimally |
 |---|---|---|
-| Goemans-Williamson | 0.999 | **147/150** |
-| supervised, **exact** labels | 0.988 | 106/150 |
-| unsupervised (rebuilt) | 0.985 | 100/150 |
-| supervised, **spectral** labels | 0.984 | 98/150 |
+| Goemans-Williamson | 0.9998 | **149/150** |
+| unsupervised | 0.9888 | 108–110/150 |
+| supervised, **exact** labels | 0.9861 | 96–103/150 |
+| supervised, **spectral** labels | 0.9856 | 97–101/150 |
 
-So the three learned variants are **statistically indistinguishable**:
-a paired Wilcoxon on the same 150 instances gives p = 0.07–0.42 (mean
-differences of 0.04–0.14 of a single cut edge; the 106 > 100 > 98
-ordering is noise, and each model is a single training seed). The label
-source makes no measurable difference — which closes the teacher-ceiling
-objection more decisively than "exact labels help a bit" would: the
-labels are not the lever. All three sit far below Goemans-Williamson,
-which is optimal on 147/150. (Reproduce with
+The two supervised label sources are indistinguishable (paired Wilcoxon
+on seed-averaged cuts, p = 0.79), so replacing a heuristic teacher with
+the true optimum does not help — the ceiling was not the limiting
+factor. The unsupervised model is marginally ahead of both supervised
+variants (p = 0.003 vs spectral, 0.053 vs exact), with the seed spread
+(≤ 0.001 in ratio) smaller than that gap. All learned variants sit far
+below Goemans-Williamson, which is optimal on 149/150. (Reproduce with
 `experiments/run_supervised_label_comparison.py`.)
 
 The follow-up evaluates held-out instances across five graph families

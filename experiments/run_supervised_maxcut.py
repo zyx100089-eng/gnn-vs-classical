@@ -167,11 +167,16 @@ def main() -> None:
     ap.add_argument("--instances", type=int, default=30)
     ap.add_argument("--gw_max_n", type=int, default=200)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--eval_seed", type=int, default=42,
+                    help="base seed for the evaluation instances; keep it "
+                         "fixed (>= every --seed) so training-seed runs are "
+                         "scored on the SAME benchmark")
     ap.add_argument("--tag", type=str, default="",
                     help="suffix for the output files (keeps runs from clobbering)")
     ap.add_argument("--labels", choices=["spectral", "exact"], default="spectral",
                     help="supervision target; 'exact' needs --train_n <= 20")
     args = ap.parse_args()
+    eval_base = max(args.seed, args.eval_seed)
     label_fn = make_exact_labels if args.labels == "exact" else make_labels
     if args.labels == "exact" and args.train_n > 20:
         raise SystemExit("--labels exact requires --train_n <= 20")
@@ -202,7 +207,7 @@ def main() -> None:
                 # (training uses base_seed .. base_seed + train_graphs - 1)
                 # so no evaluation instance can be a graph the GNN saw in
                 # training — same formula as run_maxcut_comparison.py.
-                seed_i = args.seed + args.train_graphs + inst * 1000
+                seed_i = eval_base + args.train_graphs + inst * 1000
                 G = generate_instance(family, n, seed=seed_i)
                 row = {"family": family, "n": n, "instance": inst,
                        "m": G.number_of_edges(),
